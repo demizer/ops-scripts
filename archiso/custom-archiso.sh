@@ -93,35 +93,28 @@ cat >> "$PROFILE_DIR/packages.x86_64" << 'EOF'
 fish
 tmux
 nfs-utils
-sendmail
-sendmail-cf
+msmtp
+neovim
 EOF
 
 # Create airootfs structure for custom files
 msg2 "Creating custom file structure...";
-mkdir -p "$PROFILE_DIR/airootfs/root/scripts"
+mkdir -p "$PROFILE_DIR/airootfs/root"
 mkdir -p "$PROFILE_DIR/airootfs/etc/skel"
 
-# Copy setup scripts to the ISO
-msg2 "Including setup scripts in ISO...";
-if [[ -f "$SCRIPT_DIR/setup-archiso-env.sh" ]]; then
-    # Copy and modify setup-archiso-env.sh to remove hardcoded password
-    cp "$SCRIPT_DIR/setup-archiso-env.sh" "$PROFILE_DIR/airootfs/root/scripts/setup-archiso-env.sh"
+# Copy entire ops-scripts directory to the ISO
+msg2 "Including ops-scripts directory in ISO...";
+PARENT_DIR="$(dirname "$SCRIPT_DIR")"
+if [[ -d "$PARENT_DIR" ]]; then
+    cp -r "$PARENT_DIR" "$PROFILE_DIR/airootfs/root/scripts"
     
-    # Remove hardcoded password line
-    sed -i 's/BRIDGE_PASSWORD="[^"]*" bash/bash/' "$PROFILE_DIR/airootfs/root/scripts/setup-archiso-env.sh"
+    # Make all shell scripts executable
+    find "$PROFILE_DIR/airootfs/root/scripts" -name "*.sh" -type f -exec chmod +x {} \;
     
-    chmod +x "$PROFILE_DIR/airootfs/root/scripts/setup-archiso-env.sh"
-    msg2 "Modified setup-archiso-env.sh to remove hardcoded password";
+    msg2 "Copied ops-scripts directory with all files and git history";
 else
-    warning "setup-archiso-env.sh not found in $SCRIPT_DIR";
-fi
-
-if [[ -f "$SCRIPT_DIR/setup-sendmail-bridge.sh" ]]; then
-    cp "$SCRIPT_DIR/setup-sendmail-bridge.sh" "$PROFILE_DIR/airootfs/root/scripts/"
-    chmod +x "$PROFILE_DIR/airootfs/root/scripts/setup-sendmail-bridge.sh"
-else
-    warning "setup-sendmail-bridge.sh not found in $SCRIPT_DIR";
+    error "ops-scripts parent directory not found at $PARENT_DIR";
+    exit 1;
 fi
 
 # Set fish as default shell for root
@@ -147,14 +140,14 @@ alias l='ls -CF'
 alias ..='cd ..'
 alias ...='cd ../..'
 
-# Set environment setup script path
-set -gx SETUP_SCRIPT_PATH "/root/scripts/setup-archiso-env.sh"
-
 # Display setup instructions on login
 echo "Custom Arch Linux Live Environment Ready!"
-echo "Run setup script with: \$SETUP_SCRIPT_PATH"
-echo "Available scripts in /root/scripts/:"
-ls -la /root/scripts/ 2>/dev/null | grep -E "\\.sh\$" | awk '{print "  - " $9}'
+echo "Available scripts:"
+echo "  - ./scripts/archiso/setup-archiso-env.sh"
+echo "  - ./scripts/archiso/setup-sendmail-bridge.sh"
+echo "  - ./scripts/archiso/test-archiso-qemu.sh"
+echo ""
+echo "Example: cd ~ && ./scripts/archiso/setup-archiso-env.sh"
 EOF
 
 # Create a customize_airootfs.sh script to set fish as default shell
@@ -172,11 +165,11 @@ fi
 # Enable SSH service by default
 systemctl enable sshd
 
-# Create symlink for easy access to setup script
-ln -sf /root/scripts/setup-archiso-env.sh /root/setup-env
+# Create symlink for easy access to main setup script
+ln -sf /root/scripts/archiso/setup-archiso-env.sh /root/setup-env
 
-# Set executable permissions on all scripts
-chmod +x /root/scripts/*.sh 2>/dev/null || true
+# Set executable permissions on all scripts (already done during copy)
+find /root/scripts -name "*.sh" -type f -exec chmod +x {} \;
 EOF
 
 chmod +x "$PROFILE_DIR/airootfs/root/customize_airootfs.sh"
@@ -206,7 +199,7 @@ cat > "$PROFILE_DIR/airootfs/etc/motd" << 'EOF'
 
 alvaone arch iso
 Default shell: fish
-Setup script: /root/setup-env
+Setup script: ./setup-env
 
 EOF
 
@@ -256,13 +249,13 @@ msg "Custom Arch ISO creation completed!";
 msg2 "Features included:";
 msg2 "  - Fish shell as default";
 msg2 "  - SSH daemon enabled";
-msg2 "  - Setup scripts in /root/scripts/";
-msg2 "  - Environment setup script at /root/setup-env";
-msg2 "  - NFS, tmux, sendmail pre-installed";
+msg2 "  - Complete ops-scripts directory at /root/scripts/";
+msg2 "  - Environment setup script at ./setup-env";
+msg2 "  - NFS, tmux, msmtp, neovim pre-installed";
 
 if [[ -n "$ISO_FILE" ]]; then
     msg2 "To use the ISO:";
     msg2 "  1. Flash to USB: dd if='$ISO_FILE' of=/dev/sdX bs=4M status=progress";
     msg2 "  2. Boot from USB";
-    msg2 "  3. Run: /root/setup-env";
+    msg2 "  3. Run: ./setup-env";
 fi
