@@ -4,33 +4,6 @@
 # Configures msmtp to send mail via local Proton Mail Bridge
 # Based on configuration from /home/jesusa/bigbrain/bigbrain/Sys Admin/Proton Mail.md
 
-# Update package database for Arch Linux live ISO
-msg "Updating package database..."
-pacman -Syy
-
-# Proton Mail Bridge Configuration (network bridge)
-BRIDGE_HOST="ops.alvaone.net"
-BRIDGE_PORT="1025"
-BRIDGE_USER="ops@alva.rez.codes"
-
-# Prompt for bridge password if not set in environment
-if [[ -z "$BRIDGE_PASSWORD" ]]; then
-    msg2 "Proton Mail Bridge password required for authentication";
-    echo -n "Enter bridge password: "
-    read -s BRIDGE_PASSWORD
-    echo
-    if [[ -z "$BRIDGE_PASSWORD" ]]; then
-        error "Bridge password is required";
-        exit 1;
-    fi
-fi
-
-# Check for test flag
-TEST_MODE=false
-if [[ "$1" == "--test" ]]; then
-    TEST_MODE=true
-fi
-
 # Color output functions (matching tar-backup.sh style)
 unset ALL_OFF BOLD BLUE GREEN RED YELLOW
 
@@ -72,6 +45,29 @@ error() {
     printf "${RED}==> ERROR:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
 }
 
+# Proton Mail Bridge Configuration (network bridge)
+BRIDGE_HOST="ops.alvaone.net"
+BRIDGE_PORT="1025"
+BRIDGE_USER="ops@alva.rez.codes"
+
+# Prompt for bridge password if not set in environment
+if [[ -z "$BRIDGE_PASSWORD" ]]; then
+    msg2 "Proton Mail Bridge password required for authentication";
+    echo -n "Enter bridge password: "
+    read -s BRIDGE_PASSWORD
+    echo
+    if [[ -z "$BRIDGE_PASSWORD" ]]; then
+        error "Bridge password is required";
+        exit 1;
+    fi
+fi
+
+# Check for test flag
+TEST_MODE=false
+if [[ "$1" == "--test" ]]; then
+    TEST_MODE=true
+fi
+
 # Test mode - only send test email
 if [[ "$TEST_MODE" == true ]]; then
     msg "Sending test email via msmtp...";
@@ -95,13 +91,13 @@ fi
 
 msg "Setting up msmtp for Proton Mail Bridge on Arch Linux";
 
-# Check if msmtp is already installed
-if ! pacman -Q msmtp &>/dev/null; then
-    msg2 "Installing msmtp...";
-    pacman -S --noconfirm msmtp
-else
-    msg2 "msmtp already installed";
+# Verify msmtp is installed (should be pre-installed in the ISO)
+if ! command -v msmtp &>/dev/null; then
+    error "msmtp is not installed. This script expects msmtp to be pre-installed in the ISO.";
+    exit 1;
 fi
+
+msg2 "msmtp found - proceeding with configuration";
 
 # Check if msmtp is already configured for bridge
 if [[ -f /etc/msmtprc ]] && grep -q "ops.alvaone.net" /etc/msmtprc; then

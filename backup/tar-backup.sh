@@ -168,9 +168,24 @@ PID2=$!
 
 PREV_SIZE=0
 PREV_TIME=$BACKUP_START_TIME
+SPINNER_CHARS='/-\|'
+SPINNER_INDEX=0
+
 while [[ `ps -p $PID2 -o pid=` ]]; do
-    sleep 1;
+    sleep 0.5;
     CURRENT_TIME=$(date +%s)
+    
+    # Get spinner character
+    SPINNER_CHAR=${SPINNER_CHARS:$SPINNER_INDEX:1}
+    SPINNER_INDEX=$(( (SPINNER_INDEX + 1) % 4 ))
+    
+    # Count files processed (lines in log)
+    if [[ -f "/root/backuplog.txt" ]]; then
+        FILE_COUNT=$(wc -l < "/root/backuplog.txt" 2>/dev/null || echo 0)
+    else
+        FILE_COUNT=0
+    fi
+    
     if [[ -f "${BACKUP_DIR}/${FILENAME}" ]]; then
         BACKUP_SIZE_KB=$(du "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
         BACKUP_SIZE_MB=$((BACKUP_SIZE_KB / 1024))
@@ -192,12 +207,35 @@ while [[ `ps -p $PID2 -o pid=` ]]; do
         PERC=$(( ${LOG_SIZE} * 100 / ${FIN_SIZE} ));
         FPERC=`printf "%2d" ${PERC}`;
         
-        msgr "${BACKM}${FPERC}%% (${BACKUP_SIZE_MB}MB @ ${SPEED_MBS}MB/s)";
+        # Create progress bar (20 chars wide)
+        PROGRESS_WIDTH=20
+        FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
+        PROGRESS_BAR=""
+        for ((i=0; i<FILLED_WIDTH; i++)); do
+            PROGRESS_BAR+="="
+        done
+        for ((i=FILLED_WIDTH; i<PROGRESS_WIDTH; i++)); do
+            PROGRESS_BAR+=" "
+        done
+        
+        printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${BACKUP_SIZE_MB}MB ${SPEED_MBS}MB/s ${SPINNER_CHAR}${ALL_OFF}" >&2;
     else
         LOG_SIZE=`du /root/backuplog.txt | cut -f 1`;
         PERC=$(( ${LOG_SIZE} * 100 / ${FIN_SIZE} ));
         FPERC=`printf "%2d" ${PERC}`;
-        msgr "${BACKM}${FPERC}%%";
+        
+        # Create progress bar (20 chars wide)
+        PROGRESS_WIDTH=20
+        FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
+        PROGRESS_BAR=""
+        for ((i=0; i<FILLED_WIDTH; i++)); do
+            PROGRESS_BAR+="="
+        done
+        for ((i=FILLED_WIDTH; i<PROGRESS_WIDTH; i++)); do
+            PROGRESS_BAR+=" "
+        done
+        
+        printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${SPINNER_CHAR}${ALL_OFF}" >&2;
     fi
 done
 echo;
