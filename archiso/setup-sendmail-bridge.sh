@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Arch Linux Sendmail Setup Script for Proton Mail Bridge
-# Configures sendmail to send mail via local Proton Mail Bridge
+# Arch Linux msmtp Setup Script for Proton Mail Bridge
+# Configures msmtp to send mail via local Proton Mail Bridge
 # Based on configuration from /home/jesusa/bigbrain/bigbrain/Sys Admin/Proton Mail.md
 
 # Update package database for Arch Linux live ISO
@@ -74,11 +74,11 @@ error() {
 
 # Test mode - only send test email
 if [[ "$TEST_MODE" == true ]]; then
-    msg "Sending test email via sendmail...";
+    msg "Sending test email via msmtp...";
     TEST_MESSAGE="Test email from archiso at $(date)"
-    TEST_SUBJECT="Sendmail Test from archiso"
+    TEST_SUBJECT="msmtp Test from archiso"
     
-    if echo "$TEST_MESSAGE" | mail -s "$TEST_SUBJECT" "$BRIDGE_USER" &>/dev/null; then
+    if echo -e "Subject: $TEST_SUBJECT\n\n$TEST_MESSAGE" | msmtp "$BRIDGE_USER" &>/dev/null; then
         msg "Test email sent successfully to $BRIDGE_USER";
     else
         error "Failed to send test email";
@@ -93,30 +93,27 @@ if [[ "$(id -u)" != "0" ]]; then
     exit 1;
 fi
 
-msg "Setting up sendmail for Proton Mail Bridge on Arch Linux";
+msg "Setting up msmtp for Proton Mail Bridge on Arch Linux";
 
-# Check if sendmail is already installed
-if ! pacman -Q sendmail &>/dev/null; then
-    msg2 "Installing sendmail...";
-    pacman -S --noconfirm sendmail
+# Check if msmtp is already installed
+if ! pacman -Q msmtp &>/dev/null; then
+    msg2 "Installing msmtp...";
+    pacman -S --noconfirm msmtp
 else
-    msg2 "Sendmail already installed";
+    msg2 "msmtp already installed";
 fi
 
-# Check if sendmail is already configured for bridge
-if [[ -f /etc/mail/sendmail.cf ]] && grep -q "ops.alvaone.net.*1025" /etc/mail/sendmail.cf; then
-    msg "Sendmail is already configured for Proton Mail Bridge";
+# Check if msmtp is already configured for bridge
+if [[ -f /etc/msmtprc ]] && grep -q "ops.alvaone.net" /etc/msmtprc; then
+    msg "msmtp is already configured for Proton Mail Bridge";
     exit 0;
 fi
 
-# Backup existing sendmail configuration if it exists
-if [[ -f /etc/mail/sendmail.cf ]]; then
-    msg2 "Backing up existing sendmail configuration...";
-    cp /etc/mail/sendmail.cf /etc/mail/sendmail.cf.backup.$(date +%Y%m%d_%H%M%S)
+# Backup existing msmtp configuration if it exists
+if [[ -f /etc/msmtprc ]]; then
+    msg2 "Backing up existing msmtp configuration...";
+    cp /etc/msmtprc /etc/msmtprc.backup.$(date +%Y%m%d_%H%M%S)
 fi
-
-# Create sendmail configuration directory if it doesn't exist
-mkdir -p /etc/mail
 
 # Test bridge connectivity
 msg2 "Testing Proton Mail Bridge connectivity...";
@@ -125,150 +122,66 @@ if ! nc -z ${BRIDGE_HOST} ${BRIDGE_PORT} 2>/dev/null; then
     warning "Make sure the Proton Mail Bridge is running on your network";
 fi
 
-# Create sendmail.mc configuration
-msg2 "Creating sendmail configuration...";
-cat > /etc/mail/sendmail.mc << 'EOF'
-divert(-1)dnl
-include(`/usr/share/sendmail-cf/m4/cf.m4')dnl
-VERSIONID(`sendmail.mc')dnl
-OSTYPE(`linux')dnl
+# Create msmtp configuration
+msg2 "Creating msmtp configuration...";
+cat > /etc/msmtprc << EOF
+# Default settings for all accounts
+defaults
+tls on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+syslog on
 
-dnl # Basic sendmail configuration for send-only via SMTP relay
-define(`confDONT_PROBE_INTERFACES', `True')dnl
-define(`PROCMAIL_MAILER_PATH', `/usr/bin/procmail')dnl
-define(`ALIAS_FILE', `/etc/aliases')dnl
-define(`STATUS_FILE', `/var/log/mail/statistics')dnl
-define(`UUCP_MAILER_MAX', `2000000')dnl
-define(`confUSERDB_SPEC', `/etc/mail/userdb.db')dnl
-define(`confPRIVACY_FLAGS', `authwarnings,novrfy,noexpn,restrictqrun')dnl
-define(`confTO_CONNECT', `1m')dnl
-define(`confTRY_NULL_MX_LIST', `True')dnl
-define(`confDONT_PROBE_INTERFACES', `True')dnl
-define(`PROCMAIL_MAILER_PATH', `/usr/bin/procmail')dnl
+# Proton Mail Bridge account
+account proton
+host ${BRIDGE_HOST}
+port ${BRIDGE_PORT}
+from ${BRIDGE_USER}
+auth login
+user ${BRIDGE_USER}
+password ${BRIDGE_PASSWORD}
+tls off
 
-dnl # Smart host configuration for Proton Mail Bridge
-define(`SMART_HOST', `[ops.alvaone.net]')dnl
-define(`RELAY_MAILER_ARGS', `TCP $h 1025')dnl
-define(`ESMTP_MAILER_ARGS', `TCP $h 1025')dnl
-
-dnl # SMTP Authentication
-define(`confAUTH_OPTIONS', `A p y')dnl
-TRUST_AUTH_MECH(`EXTERNAL DIGEST-MD5 CRAM-MD5 LOGIN PLAIN')dnl
-define(`confAUTH_MECHANISMS', `EXTERNAL GSSAPI DIGEST-MD5 CRAM-MD5 LOGIN PLAIN')dnl
-
-dnl # Masquerading - rewrite sender addresses
-MASQUERADE_AS(`alva.rez.codes')dnl
-FEATURE(`masquerade_envelope')dnl
-FEATURE(`masquerade_entire_domain')dnl
-
-dnl # Enable local delivery for compatibility
-FEATURE(`msp', `[ops.alvaone.net]', `1025')dnl
-
-dnl # Standard features
-FEATURE(`access_db')dnl
-FEATURE(`blacklist_recipients')dnl
-FEATURE(`accept_unresolvable_domains')dnl
-FEATURE(`accept_unqualified_senders')dnl
-FEATURE(`relay_based_on_MX')dnl
-
-dnl # Mailer definitions
-MAILER(`local')dnl
-MAILER(`smtp')dnl
+# Set default account
+account default : proton
 EOF
 
-# Generate sendmail.cf from sendmail.mc
-msg2 "Generating sendmail.cf configuration...";
-cd /etc/mail
-m4 sendmail.mc > sendmail.cf
+# Secure the msmtp config file
+chmod 600 /etc/msmtprc
 
-# Create submit.mc for client submission
-msg2 "Creating submit.mc configuration...";
-cat > /etc/mail/submit.mc << 'EOF'
-divert(-1)dnl
-include(`/usr/share/sendmail-cf/m4/cf.m4')dnl
-VERSIONID(`submit.mc')dnl
-OSTYPE(`linux')dnl
-
-define(`confCF_VERSION', `Submit')dnl
-define(`__OSTYPE__',`')dnl
-define(`_USE_DECNET_SYNTAX_', `1')dnl
-define(`confTIME_ZONE', `USE_TZ')dnl
-define(`confDONT_PROBE_INTERFACES', `True')dnl
-
-FEATURE(`msp', `[ops.alvaone.net]', `1025')dnl
-EOF
-
-# Generate submit.cf
-m4 submit.mc > submit.cf
-
-# Create aliases file
+# Create aliases file for mail command compatibility
 msg2 "Creating aliases file...";
 cat > /etc/aliases << EOF
-# Basic aliases
-postmaster: root
-abuse: root
-spam: root
-mailer-daemon: root
-
-# Forward root mail to bridge user
+# Basic aliases for msmtp
+default: ${BRIDGE_USER}
+postmaster: ${BRIDGE_USER}
+abuse: ${BRIDGE_USER}
+spam: ${BRIDGE_USER}
+mailer-daemon: ${BRIDGE_USER}
 root: ${BRIDGE_USER}
 EOF
 
-# Create local-host-names file
-msg2 "Creating local-host-names...";
-cat > /etc/mail/local-host-names << EOF
-localhost
-archiso
-archiso.local
-EOF
+# Create symbolic link for sendmail compatibility
+msg2 "Creating sendmail compatibility link...";
+ln -sf /usr/bin/msmtp /usr/sbin/sendmail
+ln -sf /usr/bin/msmtp /usr/bin/sendmail
 
-# Create access database (empty but required)
-touch /etc/mail/access
-makemap hash /etc/mail/access < /etc/mail/access
-
-# Create auth-info file for SMTP authentication
-msg2 "Creating SMTP authentication file...";
-cat > /etc/mail/auth-info << EOF
-AuthInfo:ops.alvaone.net "U:${BRIDGE_USER}" "P:${BRIDGE_PASSWORD}" "M:LOGIN PLAIN"
-EOF
-
-# Secure the auth-info file
-chmod 600 /etc/mail/auth-info
-makemap hash /etc/mail/auth-info < /etc/mail/auth-info
-
-# Build aliases database
-newaliases
-
-# Create mail directories
-mkdir -p /var/spool/mqueue
-mkdir -p /var/log/mail
-chown root:mail /var/spool/mqueue
-chmod 755 /var/spool/mqueue
-
-# Enable and start sendmail
-msg2 "Enabling and starting sendmail service...";
-systemctl enable sendmail
-systemctl restart sendmail
-
-# Test sendmail configuration
-msg2 "Testing sendmail configuration...";
-if sendmail -bt < /dev/null &>/dev/null; then
-    msg "Sendmail configuration test passed";
+# Test msmtp configuration
+msg2 "Testing msmtp configuration...";
+if msmtp --serverinfo --account=proton &>/dev/null; then
+    msg "msmtp configuration test passed";
 else
-    warning "Sendmail configuration test had warnings (this may be normal)";
+    warning "msmtp configuration test had warnings (check bridge connectivity)";
 fi
 
-msg "Sendmail setup completed successfully!";
+msg "msmtp setup completed successfully!";
 msg2 "Configuration files created/modified:";
-msg2 "  - /etc/mail/sendmail.cf";
-msg2 "  - /etc/mail/submit.cf";
+msg2 "  - /etc/msmtprc (secured with 600 permissions)";
 msg2 "  - /etc/aliases";
-msg2 "  - /etc/mail/local-host-names";
-msg2 "  - /etc/mail/auth-info (secured with 600 permissions)";
+msg2 "  - /usr/sbin/sendmail -> /usr/bin/msmtp (compatibility link)";
 
 warning "IMPORTANT: Make sure Proton Mail Bridge is running at ${BRIDGE_HOST}:${BRIDGE_PORT}";
 msg2 "To test email functionality, run:";
 msg2 "$0 --test";
 
-msg2 "To view sendmail logs, run:";
-msg2 "journalctl -u sendmail -f";
+msg2 "To view msmtp logs, run:";
+msg2 "journalctl -t msmtp -f";
