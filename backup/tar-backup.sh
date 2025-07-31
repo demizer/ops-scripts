@@ -161,16 +161,44 @@ FIN_SIZE=`du /tmp/logsize | cut -f 1`;
 
 BACKM="Performing backup... ";
 msgr "${BACKM}";
+BACKUP_START_TIME=$(date +%s)
 (tar --xz ${EXCLUDES} -cvpPf ${BACKUP_DIR}/${FILENAME} / \
     2> /root/backuplog-error.txt > /root/backuplog.txt;) &
 PID2=$!
 
+PREV_SIZE=0
+PREV_TIME=$BACKUP_START_TIME
 while [[ `ps -p $PID2 -o pid=` ]]; do
-    sleep 0.25;
-    SIZE=`du /root/backuplog.txt | cut -f 1`;
-    PERC=$(( ${SIZE} * 100 / ${FIN_SIZE} ));
-    FPERC=`printf "%2d" ${PERC}`;
-    msgr "${BACKM}${FPERC}%%";
+    sleep 1;
+    CURRENT_TIME=$(date +%s)
+    if [[ -f "${BACKUP_DIR}/${FILENAME}" ]]; then
+        BACKUP_SIZE_KB=$(du "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
+        BACKUP_SIZE_MB=$((BACKUP_SIZE_KB / 1024))
+        
+        # Calculate speed in MB/s
+        TIME_DIFF=$((CURRENT_TIME - PREV_TIME))
+        if [[ $TIME_DIFF -gt 0 ]]; then
+            SIZE_DIFF_KB=$((BACKUP_SIZE_KB - PREV_SIZE))
+            SIZE_DIFF_MB=$((SIZE_DIFF_KB / 1024))
+            SPEED_MBS=$((SIZE_DIFF_MB / TIME_DIFF))
+            PREV_SIZE=$BACKUP_SIZE_KB
+            PREV_TIME=$CURRENT_TIME
+        else
+            SPEED_MBS=0
+        fi
+        
+        # Calculate percentage based on log file size
+        LOG_SIZE=`du /root/backuplog.txt | cut -f 1`;
+        PERC=$(( ${LOG_SIZE} * 100 / ${FIN_SIZE} ));
+        FPERC=`printf "%2d" ${PERC}`;
+        
+        msgr "${BACKM}${FPERC}%% (${BACKUP_SIZE_MB}MB @ ${SPEED_MBS}MB/s)";
+    else
+        LOG_SIZE=`du /root/backuplog.txt | cut -f 1`;
+        PERC=$(( ${LOG_SIZE} * 100 / ${FIN_SIZE} ));
+        FPERC=`printf "%2d" ${PERC}`;
+        msgr "${BACKM}${FPERC}%%";
+    fi
 done
 echo;
 

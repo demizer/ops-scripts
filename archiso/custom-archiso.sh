@@ -107,10 +107,10 @@ msg2 "Including ops-scripts directory in ISO...";
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 if [[ -d "$PARENT_DIR" ]]; then
     cp -r "$PARENT_DIR" "$PROFILE_DIR/airootfs/root/scripts"
-    
+
     # Make all shell scripts executable
     find "$PROFILE_DIR/airootfs/root/scripts" -name "*.sh" -type f -exec chmod +x {} \;
-    
+
     msg2 "Copied ops-scripts directory with all files and git history";
 else
     error "ops-scripts parent directory not found at $PARENT_DIR";
@@ -123,7 +123,16 @@ mkdir -p "$PROFILE_DIR/airootfs/root"
 cat > "$PROFILE_DIR/airootfs/root/.bashrc" << 'EOF'
 # Auto-switch to fish if available and not already in fish
 if command -v fish >/dev/null 2>&1 && [ -z "$FISH_VERSION" ]; then
-    exec fish
+    # Start tmux session if not already in one
+    if command -v tmux >/dev/null 2>&1 && [ -z "$TMUX" ]; then
+        SESSION_NAME="main"
+        if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+            tmux new-session -d -s "$SESSION_NAME" fish
+        fi
+        exec tmux attach-session -t "$SESSION_NAME"
+    else
+        exec fish
+    fi
 fi
 EOF
 
@@ -131,7 +140,7 @@ EOF
 mkdir -p "$PROFILE_DIR/airootfs/root/.config/fish"
 cat > "$PROFILE_DIR/airootfs/root/.config/fish/config.fish" << 'EOF'
 # Custom fish configuration for Arch ISO
-set -g fish_greeting "Welcome to Custom Arch Linux Live Environment"
+set -g fish_greeting "Welcome to Alvaone Arch Linux Live Environment"
 
 # Add helpful aliases
 alias ll='ls -la'
@@ -141,13 +150,15 @@ alias ..='cd ..'
 alias ...='cd ../..'
 
 # Display setup instructions on login
-echo "Custom Arch Linux Live Environment Ready!"
+echo "Alvaone Arch Linux Live Environment Ready!"
+echo "Tmux session started automatically."
+echo
 echo "Available scripts:"
-echo "  - ./scripts/archiso/setup-archiso-env.sh"
-echo "  - ./scripts/archiso/setup-sendmail-bridge.sh"
-echo "  - ./scripts/archiso/test-archiso-qemu.sh"
+echo "  - ./mount-nfs        # Mount NFS backups share"
+echo "  - ./setup-email      # Configure email bridge"
 echo ""
-echo "Example: cd ~ && ./scripts/archiso/setup-archiso-env.sh"
+echo "Example: sudo ./mount-nfs"
+echo
 EOF
 
 # Create a customize_airootfs.sh script to set fish as default shell
@@ -164,9 +175,11 @@ fi
 
 # Enable SSH service by default
 systemctl enable sshd
+systemctl start sshd
 
-# Create symlink for easy access to main setup script
-ln -sf /root/scripts/archiso/setup-archiso-env.sh /root/setup-env
+# Create symlinks for easy access to scripts
+ln -sf /root/scripts/archiso/mount-nfs.sh /root/mount-nfs
+ln -sf /root/scripts/archiso/setup-sendmail-bridge.sh /root/setup-email
 
 # Set executable permissions on all scripts (already done during copy)
 find /root/scripts -name "*.sh" -type f -exec chmod +x {} \;
@@ -182,24 +195,24 @@ fi
 # Create welcome message
 msg2 "Creating welcome message...";
 cat > "$PROFILE_DIR/airootfs/etc/motd" << 'EOF'
- 
+
  █████╗ ██╗    ██╗   ██╗ █████╗  ██████╗ ███╗   ██╗███████╗
 ██╔══██╗██║    ██║   ██║██╔══██╗██╔═══██╗████╗  ██║██╔════╝
-███████║██║    ██║   ██║███████║██║   ██║██╔██╗ ██║█████╗  
-██╔══██║██║    ╚██╗ ██╔╝██╔══██║██║   ██║██║╚██╗██║██╔══╝  
+███████║██║    ██║   ██║███████║██║   ██║██╔██╗ ██║█████╗
+██╔══██║██║    ╚██╗ ██╔╝██╔══██║██║   ██║██║╚██╗██║██╔══╝
 ██║  ██║███████╗╚████╔╝ ██║  ██║╚██████╔╝██║ ╚████║███████╗
 ╚═╝  ╚═╝╚══════╝ ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-                                                            
- █████╗ ██████╗  ██████╗██╗  ██╗    ██╗███████╗ ██████╗     
-██╔══██╗██╔══██╗██╔════╝██║  ██║    ██║██╔════╝██╔═══██╗    
-███████║██████╔╝██║     ███████║    ██║███████╗██║   ██║    
-██╔══██║██╔══██╗██║     ██╔══██║    ██║╚════██║██║   ██║    
-██║  ██║██║  ██║╚██████╗██║  ██║    ██║███████║╚██████╔╝    
-╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝    ╚═╝╚══════╝ ╚═════╝     
 
-alvaone arch iso
+ █████╗ ██████╗  ██████╗██╗  ██╗    ██╗███████╗ ██████╗
+██╔══██╗██╔══██╗██╔════╝██║  ██║    ██║██╔════╝██╔═══██╗
+███████║██████╔╝██║     ███████║    ██║███████╗██║   ██║
+██╔══██║██╔══██╗██║     ██╔══██║    ██║╚════██║██║   ██║
+██║  ██║██║  ██║╚██████╗██║  ██║    ██║███████║╚██████╔╝
+╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝    ╚═╝╚══════╝ ╚═════╝
+
 Default shell: fish
-Setup script: ./setup-env
+Mount NFS: ./mount-nfs
+Setup email: ./setup-email
 
 EOF
 
@@ -212,30 +225,30 @@ cd "$BUILD_DIR"
 
 if mkarchiso -v -w "$BUILD_DIR/work" -o "$OUTPUT_DIR" "$PROFILE_DIR"; then
     msg "Custom Arch ISO built successfully!";
-    
+
     # Find the generated ISO file
     ISO_FILE=$(find "$OUTPUT_DIR" -name "*.iso" -type f | head -n 1)
     if [[ -n "$ISO_FILE" ]]; then
         ISO_SIZE=$(du -h "$ISO_FILE" | cut -f1)
         msg2 "ISO file: $ISO_FILE";
         msg2 "Size: $ISO_SIZE";
-        
+
         # Calculate checksums
         msg2 "Calculating checksums...";
         cd "$OUTPUT_DIR"
         sha256sum "$(basename "$ISO_FILE")" > "$(basename "$ISO_FILE").sha256"
         md5sum "$(basename "$ISO_FILE")" > "$(basename "$ISO_FILE").md5"
-        
+
         msg2 "Checksum files created:";
         msg2 "  - $(basename "$ISO_FILE").sha256";
         msg2 "  - $(basename "$ISO_FILE").md5";
     else
         warning "Could not find generated ISO file in $OUTPUT_DIR";
     fi
-    
+
     msg2 "Build completed successfully!";
     msg2 "Files available in: $OUTPUT_DIR";
-    
+
 else
     error "ISO build failed!";
     exit 1;
@@ -247,15 +260,16 @@ rm -rf "$BUILD_DIR"
 
 msg "Custom Arch ISO creation completed!";
 msg2 "Features included:";
-msg2 "  - Fish shell as default";
-msg2 "  - SSH daemon enabled";
+msg2 "  - Fish shell as default with auto-tmux";
+msg2 "  - SSH daemon enabled and auto-started";
 msg2 "  - Complete ops-scripts directory at /root/scripts/";
-msg2 "  - Environment setup script at ./setup-env";
+msg2 "  - NFS mount script at ./mount-nfs";
+msg2 "  - Email setup script at ./setup-email";
 msg2 "  - NFS, tmux, msmtp, neovim pre-installed";
 
 if [[ -n "$ISO_FILE" ]]; then
     msg2 "To use the ISO:";
     msg2 "  1. Flash to USB: dd if='$ISO_FILE' of=/dev/sdX bs=4M status=progress";
     msg2 "  2. Boot from USB";
-    msg2 "  3. Run: ./setup-env";
+    msg2 "  3. Run: ./mount-nfs (to mount backups)";
 fi
