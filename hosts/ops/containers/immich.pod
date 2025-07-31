@@ -1,0 +1,10 @@
+[Pod]
+PodName=immich
+PodmanArgs=--infra-name=immich-pod
+PodmanArgs=--security-opt=label=level:s0:c80
+PublishPort=8080:2283
+PublishPort=5432:5432
+
+[Install]
+WantedBy=default.target
+

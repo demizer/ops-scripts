@@ -1,0 +1,14 @@
+[Container]
+Image=docker.io/jellyfin/jellyfin:latest
+AutoUpdate=registry
+PublishPort=8096:8096/tcp
+UserNS=keep-id
+Volume=jellyfin-config:/config:Z
+Volume=jellyfin-cache:/cache:Z
+Volume=jellyfin-movies:/media/movies:Z
+
+[Service]
+SuccessExitStatus=0 143
+
+[Install]
+WantedBy=default.target

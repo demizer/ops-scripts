@@ -1,0 +1,13 @@
+[Unit]
+Description=Immich Machine Learning
+After=local-fs.target
+
+[Container]
+Image=ghcr.io/immich-app/immich-machine-learning:release
+ContainerName=immich-machine-learning
+Pod=immich.pod
+Volume=immich-model-cache:/cache:Z
+
+[Install]
+WantedBy=default.target
+

@@ -1,0 +1,21 @@
+[Unit]
+Description=Immich Database
+After=local-fs.target
+
+[Container]
+Image=docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0
+ContainerName=immich-database
+Pod=immich.pod
+Environment=POSTGRES_PASSWORD=postgres
+Environment=POSTGRES_USER=postgres
+Environment=POSTGRES_DB=immich
+Environment=POSTGRES_INITDB_ARGS=--data-checksums
+Volume=immich-database:/var/lib/postgresql/data:Z
+HealthCmd=pg_isready --dbname='immich' --username='postgres' || exit 1
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=5
+
+[Install]
+WantedBy=default.target
+

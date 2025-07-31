@@ -1,0 +1,16 @@
+[Unit]
+Description=Immich Redis
+After=local-fs.target
+
+[Container]
+Image=docker.io/redis:6.2-alpine
+ContainerName=immich-redis
+Pod=immich.pod
+HealthCmd=redis-cli ping || exit 1
+HealthInterval=5s
+HealthTimeout=3s
+HealthRetries=5
+
+[Install]
+WantedBy=default.target
+
