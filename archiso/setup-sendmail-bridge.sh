@@ -73,7 +73,7 @@ if [[ "$TEST_MODE" == true ]]; then
     msg "Sending test email via msmtp...";
     TEST_MESSAGE="Test email from archiso at $(date)"
     TEST_SUBJECT="msmtp Test from archiso"
-    
+
     if echo -e "Subject: $TEST_SUBJECT\n\n$TEST_MESSAGE" | msmtp "$BRIDGE_USER" &>/dev/null; then
         msg "Test email sent successfully to $BRIDGE_USER";
     else

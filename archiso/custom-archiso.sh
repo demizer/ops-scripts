@@ -55,6 +55,7 @@ fi
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORIGINAL_DIR="$(pwd)"
 BUILD_DIR="/tmp/archiso-custom"
 PROFILE_DIR="$BUILD_DIR/profile"
 OUTPUT_DIR="/tmp/archiso-output"
@@ -82,7 +83,7 @@ else
         msg2 "  sudo BRIDGE_PASSWORD=\"password\" ./archiso/custom-archiso.sh  # Direct pass";
         echo;
     fi
-    
+
     echo -n "Enter Proton Mail Bridge password (leave empty to skip): "
     read -s BRIDGE_PASSWORD
     echo
@@ -116,6 +117,12 @@ fi
 msg2 "Setting up build environment...";
 mkdir -p "$BUILD_DIR"
 cp -r /usr/share/archiso/configs/releng "$PROFILE_DIR"
+
+# Customize the ISO volume label
+msg2 "Setting custom volume label...";
+BUILD_DATE=$(date +%Y%m%d)
+ISO_LABEL="ALVA_ISO_${BUILD_DATE}"
+sed -i "s/iso_label=\".*\"/iso_label=\"$ISO_LABEL\"/" "$PROFILE_DIR/profiledef.sh"
 
 # Customize packages.x86_64 to include fish and other packages
 msg2 "Customizing package list...";
@@ -320,6 +327,35 @@ if mkarchiso -v -w "$BUILD_DIR/work" -o "$OUTPUT_DIR" "$PROFILE_DIR"; then
         msg2 "Checksum files created:";
         msg2 "  - $(basename "$ISO_FILE").sha256";
         msg2 "  - $(basename "$ISO_FILE").md5";
+
+        # Copy ISO to original directory with date-based name
+        msg2 "Copying ISO to original directory...";
+        BUILD_DATE=$(date +%Y%m%d)
+        DEST_ISO="alvaone-archiso-${BUILD_DATE}.iso"
+        DEST_PATH="$ORIGINAL_DIR/$DEST_ISO"
+
+        # Check if file already exists and ask for confirmation
+        if [[ -f "$DEST_PATH" ]]; then
+            warning "File already exists: $DEST_ISO";
+            echo -n "Overwrite existing file? (y/N): "
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                msg2 "Skipping ISO copy to original directory";
+                msg2 "Original ISO available at: $ISO_FILE";
+            else
+                cp "$ISO_FILE" "$DEST_PATH"
+                cp "$(basename "$ISO_FILE").sha256" "$ORIGINAL_DIR/${DEST_ISO}.sha256"
+                cp "$(basename "$ISO_FILE").md5" "$ORIGINAL_DIR/${DEST_ISO}.md5"
+                msg2 "ISO copied to: $DEST_PATH";
+                msg2 "Checksums copied: $ORIGINAL_DIR/${DEST_ISO}.sha256, $ORIGINAL_DIR/${DEST_ISO}.md5";
+            fi
+        else
+            cp "$ISO_FILE" "$DEST_PATH"
+            cp "$(basename "$ISO_FILE").sha256" "$ORIGINAL_DIR/${DEST_ISO}.sha256"
+            cp "$(basename "$ISO_FILE").md5" "$ORIGINAL_DIR/${DEST_ISO}.md5"
+            msg2 "ISO copied to: $DEST_PATH";
+            msg2 "Checksums copied: $ORIGINAL_DIR/${DEST_ISO}.sha256, $ORIGINAL_DIR/${DEST_ISO}.md5";
+        fi
     else
         warning "Could not find generated ISO file in $OUTPUT_DIR";
     fi
@@ -347,4 +383,14 @@ msg2 "  - Backup scripts at ./tar-backup and ./rsync-backup";
 msg2 "  - NFS, tmux, msmtp, neovim pre-installed";
 if [[ -n "$BRIDGE_PASSWORD" ]]; then
     msg2 "  - Bridge password pre-configured for email setup";
+fi
+
+# Final notification about ISO location
+if [[ -n "$ISO_FILE" ]] && [[ -f "$DEST_PATH" ]]; then
+    echo
+    msg "ISO ready for use!";
+    msg2 "Location: $DEST_PATH";
+    msg2 "Size: $(du -h "$DEST_PATH" | cut -f1)";
+    echo
+    msg2 "To flash to SD card: sudo ./flash-sdcard.py -v $DEST_PATH /dev/sdX";
 fi
