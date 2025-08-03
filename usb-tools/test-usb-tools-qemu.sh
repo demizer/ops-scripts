@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # QEMU Test Script for Custom Arch ISO
-# Tests the custom archiso build using QEMU virtual machine
+# Tests the USB tools system using QEMU virtual machine
 # Automatically detects the most recent ISO in the output directory
 
 # Color output functions (matching other scripts)
@@ -53,7 +53,7 @@ debug() {
 }
 
 # Configuration
-OUTPUT_DIR="/tmp/archiso-output"
+OUTPUT_DIR="/tmp/usb-tools-output"
 QEMU_MEMORY="4G"
 QEMU_CPUS="2"
 OVMF_CODE="/usr/share/edk2/x64/OVMF_CODE.4m.fd"
@@ -68,6 +68,9 @@ HOST_NETWORKING=true
 CREATE_BRIDGE=false
 REMOVE_BRIDGE=false
 DEBUG_MODE=false
+BOOT_DEVICE=""
+CREATE_ISO_FROM_DEVICE=false
+AUTO_YES=false
 
 show_help() {
     cat << EOF
@@ -86,6 +89,9 @@ OPTIONS:
     --remove-bridge     Remove QEMU network bridge configuration
     --debug             Enable debug output for bridge creation
     --iso PATH          Use specific ISO file instead of auto-detection
+    --device PATH       Boot from device with PCIe passthrough (requires IOMMU)
+    --create-iso        Create ISO from --device and boot from that (faster than USB passthrough)
+    -y, --yes           Answer yes to all prompts
 
 EXAMPLES:
     $0                          # Test with default settings
@@ -93,6 +99,8 @@ EXAMPLES:
     $0 --bios                  # Test in legacy BIOS mode
     $0 --headless              # Test without graphics
     $0 --iso /path/to/test.iso # Test specific ISO file
+    $0 --device /dev/sdb       # Boot from USB/SD card with PCIe passthrough
+    $0 --device /dev/sdb --create-iso # Create ISO from device and boot (faster)
 
 EOF
 }
@@ -138,6 +146,18 @@ while [[ $# -gt 0 ]]; do
         --iso)
             CUSTOM_ISO="$2"
             shift 2
+            ;;
+        --device)
+            BOOT_DEVICE="$2"
+            shift 2
+            ;;
+        --create-iso)
+            CREATE_ISO_FROM_DEVICE=true
+            shift
+            ;;
+        -y|--yes)
+            AUTO_YES=true
+            shift
             ;;
         *)
             error "Unknown option: $1"
@@ -205,11 +225,16 @@ if [[ "$CREATE_BRIDGE" == true ]]; then
     if [[ -n "$CURRENT_CONNECTION" ]]; then
         msg2 "Current connection: $CURRENT_CONNECTION";
         warning "This will temporarily disconnect your network!";
-        read -p "Continue? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            msg2 "Bridge creation cancelled";
-            exit 0;
+        
+        if [[ "$AUTO_YES" == true ]]; then
+            msg2 "Continuing with bridge creation (--yes specified)";
+        else
+            read -p "Continue? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                msg2 "Bridge creation cancelled";
+                exit 0;
+            fi
         fi
     fi
 
@@ -438,44 +463,159 @@ fi
 
 msg "Testing Custom Arch ISO with QEMU";
 
+# Check for leftover qemu*.iso files in current directory and prompt for deletion
+QEMU_ISO_FILES=(./qemu*.iso)
+if [[ -f "${QEMU_ISO_FILES[0]}" ]]; then
+    msg2 "Found leftover QEMU ISO files in current directory:";
+    for iso_file in "${QEMU_ISO_FILES[@]}"; do
+        if [[ -f "$iso_file" ]]; then
+            ISO_SIZE=$(du -h "$iso_file" | cut -f1)
+            ISO_DATE=$(stat -c '%y' "$iso_file" | cut -d'.' -f1)
+            msg2 "  $(basename "$iso_file") - $ISO_SIZE - $ISO_DATE";
+        fi
+    done
+    echo
+    
+    if [[ "$AUTO_YES" == true ]]; then
+        msg2 "Auto-deleting leftover ISO files (--yes specified)";
+        DELETE_ISOS=true
+    else
+        read -p "Delete these leftover ISO files? (y/N): " -n 1 -r
+        echo
+        DELETE_ISOS=false
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            DELETE_ISOS=true
+        fi
+    fi
+    
+    if [[ "$DELETE_ISOS" == true ]]; then
+        for iso_file in "${QEMU_ISO_FILES[@]}"; do
+            if [[ -f "$iso_file" ]]; then
+                rm -f "$iso_file"
+                msg2 "Deleted: $(basename "$iso_file")";
+            fi
+        done
+    else
+        msg2 "Keeping existing ISO files";
+    fi
+    echo
+fi
+
 # Check if QEMU is installed
 if ! command -v qemu-system-x86_64 &>/dev/null; then
     error "QEMU is not installed. Install with: pacman -S qemu-desktop";
     exit 1;
 fi
 
-# Find ISO file
-if [[ -n "$CUSTOM_ISO" ]]; then
-    if [[ ! -f "$CUSTOM_ISO" ]]; then
-        error "Custom ISO file not found: $CUSTOM_ISO";
+# Determine boot source (device or ISO)
+if [[ -n "$BOOT_DEVICE" ]]; then
+    # Boot from device
+    if [[ ! -b "$BOOT_DEVICE" ]]; then
+        error "Boot device not found or not a block device: $BOOT_DEVICE";
         exit 1;
     fi
-    ISO_FILE="$CUSTOM_ISO"
-    msg2 "Using custom ISO: $ISO_FILE";
+    
+    # Check device info
+    DEVICE_SIZE=$(lsblk -b -n -o SIZE "$BOOT_DEVICE" 2>/dev/null | head -1)
+    if [[ -n "$DEVICE_SIZE" ]]; then
+        DEVICE_SIZE_GB=$((DEVICE_SIZE / 1024 / 1024 / 1024))
+        msg2 "Device size: ${DEVICE_SIZE_GB}GB";
+    fi
+    
+    # Show partition info if available
+    msg2 "Device partition info:";
+    lsblk "$BOOT_DEVICE" 2>/dev/null | while IFS= read -r line; do
+        msg2 "  $line";
+    done
+    
+    # Create ISO from device if requested
+    if [[ "$CREATE_ISO_FROM_DEVICE" == true ]]; then
+        msg2 "Creating ISO from device for faster booting...";
+        
+        # Check if running as root for device access
+        if [[ "$(id -u)" != "0" ]]; then
+            error "Creating ISO from device requires root privileges";
+            exit 1;
+        fi
+        
+        # Create ISO file in current directory
+        TEMP_ISO="./qemu-device-$(basename "$BOOT_DEVICE")-$(date +%Y%m%d-%H%M%S).iso"
+        
+        msg2 "Creating ISO: $TEMP_ISO";
+        msg2 "This may take a few minutes depending on device size...";
+        
+        # Use dd to create ISO from device with progress
+        if command -v pv &>/dev/null; then
+            # Use pv for progress if available
+            pv "$BOOT_DEVICE" > "$TEMP_ISO"
+        else
+            # Fallback to dd with periodic status
+            dd if="$BOOT_DEVICE" of="$TEMP_ISO" bs=1M status=progress
+        fi
+        
+        if [[ $? -ne 0 ]]; then
+            error "Failed to create ISO from device";
+            rm -f "$TEMP_ISO"
+            exit 1;
+        fi
+        
+        BOOT_SOURCE="$TEMP_ISO"
+        msg2 "ISO created successfully: $BOOT_SOURCE";
+        
+        # Cleanup function for ISO (still in current directory)
+        cleanup_temp_iso() {
+            if [[ -f "$TEMP_ISO" ]]; then
+                msg2 "Cleaning up ISO: $TEMP_ISO";
+                rm -f "$TEMP_ISO"
+            fi
+        }
+        trap cleanup_temp_iso EXIT
+        
+        # Set flag to boot from ISO instead of device
+        USE_DEVICE_PASSTHROUGH=false
+    else
+        BOOT_SOURCE="$BOOT_DEVICE"
+        msg2 "Using boot device: $BOOT_SOURCE";
+        USE_DEVICE_PASSTHROUGH=true
+    fi
+    
 else
-    # Auto-detect most recent ISO
-    if [[ ! -d "$OUTPUT_DIR" ]]; then
-        error "Output directory not found: $OUTPUT_DIR";
-        error "Run custom-archiso.sh first to build the ISO";
-        exit 1;
+    # Boot from ISO file
+    if [[ -n "$CUSTOM_ISO" ]]; then
+        if [[ ! -f "$CUSTOM_ISO" ]]; then
+            error "Custom ISO file not found: $CUSTOM_ISO";
+            exit 1;
+        fi
+        ISO_FILE="$CUSTOM_ISO"
+        msg2 "Using custom ISO: $ISO_FILE";
+    else
+        # Auto-detect most recent ISO
+        if [[ ! -d "$OUTPUT_DIR" ]]; then
+            error "Output directory not found: $OUTPUT_DIR";
+            error "Run create-usb-tools.sh first to build the USB system";
+            exit 1;
+        fi
+
+        ISO_FILE=$(find "$OUTPUT_DIR" -name "*.iso" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+
+        if [[ -z "$ISO_FILE" ]]; then
+            error "No ISO file found in $OUTPUT_DIR";
+            error "Run create-usb-tools.sh first to build the USB system";
+            exit 1;
+        fi
+
+        msg2 "Auto-detected ISO: $ISO_FILE";
     fi
-
-    ISO_FILE=$(find "$OUTPUT_DIR" -name "*.iso" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
-
-    if [[ -z "$ISO_FILE" ]]; then
-        error "No ISO file found in $OUTPUT_DIR";
-        error "Run custom-archiso.sh first to build the ISO";
-        exit 1;
-    fi
-
-    msg2 "Auto-detected ISO: $ISO_FILE";
+    
+    BOOT_SOURCE="$ISO_FILE"
+    USE_DEVICE_PASSTHROUGH=false
+    
+    # Check ISO file size and modification time
+    ISO_SIZE=$(du -h "$ISO_FILE" | cut -f1)
+    ISO_DATE=$(stat -c '%y' "$ISO_FILE" | cut -d'.' -f1)
+    msg2 "ISO size: $ISO_SIZE";
+    msg2 "ISO created: $ISO_DATE";
 fi
-
-# Check ISO file size and modification time
-ISO_SIZE=$(du -h "$ISO_FILE" | cut -f1)
-ISO_DATE=$(stat -c '%y' "$ISO_FILE" | cut -d'.' -f1)
-msg2 "ISO size: $ISO_SIZE";
-msg2 "ISO created: $ISO_DATE";
 
 # UEFI mode checks
 if [[ "$UEFI_MODE" == true ]]; then
@@ -500,9 +640,13 @@ QEMU_CMD=(
     "-enable-kvm"
     "-m" "$MEMORY"
     "-smp" "$CPUS"
-    "-cdrom" "$ISO_FILE"
-    "-boot" "d"
 )
+
+# Add boot source using virtio drive
+QEMU_CMD+=("-drive" "file=$BOOT_SOURCE,format=raw,if=virtio,media=disk")
+QEMU_CMD+=("-boot" "menu=on")
+
+msg2 "Using virtio drive for boot";
 
 # Check for bridge networking requirements
 if [[ "$HOST_NETWORKING" == true ]]; then
@@ -571,6 +715,7 @@ msg2 "QEMU configuration:";
 msg2 "  Memory: $MEMORY";
 msg2 "  CPUs: $CPUS";
 msg2 "  Boot mode: $([ "$UEFI_MODE" == true ] && echo "UEFI" || echo "BIOS")";
+msg2 "  Boot source: $([ "$USE_DEVICE_PASSTHROUGH" == true ] && echo "Device passthrough ($BOOT_DEVICE)" || echo "ISO ($BOOT_SOURCE)")";
 msg2 "  Graphics: $([ "$HEADLESS" == true ] && echo "Headless (VNC)" || echo "GUI")";
 msg2 "  Networking: $([ "$HOST_NETWORKING" == true ] && echo "Host bridge" || echo "NAT/User")";
 

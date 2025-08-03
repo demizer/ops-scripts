@@ -119,7 +119,7 @@ fi
 
 # 4. Start tmux session
 msg2 "Starting tmux session...";
-SESSION_NAME="archiso-session"
+SESSION_NAME="usb-tools-session"
 
 # Check if tmux is installed
 if ! command -v tmux &> /dev/null; then

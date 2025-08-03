@@ -1,0 +1,2 @@
+- Always check commands for exit 0, if a command fails, do not fallback to other techniques just exit 1.
+- Always verify changes and exit non-zero with a meaningful message

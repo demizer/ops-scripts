@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Easy tar backup script
+# Easy tar backup script with command line options
 # Meant to be run as root
 # Displays progress indicator when ran in the terminal
 
@@ -8,16 +8,15 @@
 # File and Error logs are sent to the following address:
 EMAIL="nas@alva.rez.codes"
 
-# The directory backups will be saved to
-BACKUP_DIR="/mnt/backups"
-
-# The FULL path of the exclude file
-# TODO: NEED TO ALLOW SETTING THIS!
-EXCLUDE_FILE_NAME="/home/demizer/bin/backup-excludes.txt"
+# Default values
+DEFAULT_BACKUP_DIR="/mnt/backups"
+DEFAULT_SOURCE_PATH="/"
 
 # Script variables
 # Keep only the last N backups
-if [[ $HOSTNAME == "lithium" ]]; then
+if [[ -n "$CUSTOM_KEEP" ]]; then
+    REFRESH="$CUSTOM_KEEP"
+elif [[ $HOSTNAME == "lithium" ]]; then
     REFRESH=6;
 else
     REFRESH=4;
@@ -79,12 +78,98 @@ error() {
 # $2 = Subject
 # $3 = attachment
 send_email() {
+    if [[ "$SEND_EMAIL" != true ]]; then
+        return 0
+    fi
+    
     if [[ $3 == "" ]]; then
         echo -e "${1}" | mail -s "${2}" "${EMAIL}" &> /dev/null;
     else
         echo -e "${1}" | uuencode "${3}" "$(basename "${3}")" | mail -s "${2}" "${EMAIL}" &> /dev/null;
     fi
 }
+
+# Function to show help
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS] [SOURCE_PATH] [DEST_DIR]
+
+Create compressed tar backup with progress display
+
+ARGUMENTS:
+    SOURCE_PATH     Path to backup (default: /)
+    DEST_DIR        Directory where backup will be created (default: /mnt/backups)
+
+OPTIONS:
+    -h, --help      Show this help message
+    -e, --email     Email address for notifications (default: nas@alva.rez.codes)
+    -k, --keep      Number of old backups to keep (default: 4 or 6 for lithium)
+    --no-email      Disable email notifications
+    --no-cleanup    Don't remove old backups
+
+EXAMPLES:
+    $0                              # Backup / to /mnt/backups
+    $0 /home /backup/home           # Backup /home to /backup/home
+    $0 --no-email /data /backup    # Backup /data to /backup without email
+    $0 -k 10 /opt /mnt/backups     # Keep 10 old backups
+
+EOF
+}
+
+# Parse command line arguments
+SOURCE_PATH="$DEFAULT_SOURCE_PATH"
+BACKUP_DIR="$DEFAULT_BACKUP_DIR"
+SEND_EMAIL=true
+CLEANUP_BACKUPS=true
+CUSTOM_KEEP=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -e|--email)
+            EMAIL="$2"
+            shift 2
+            ;;
+        -k|--keep)
+            CUSTOM_KEEP="$2"
+            shift 2
+            ;;
+        --no-email)
+            SEND_EMAIL=false
+            shift
+            ;;
+        --no-cleanup)
+            CLEANUP_BACKUPS=false
+            shift
+            ;;
+        -*)
+            error "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+        *)
+            if [[ "$SOURCE_PATH" == "$DEFAULT_SOURCE_PATH" ]]; then
+                SOURCE_PATH="$1"
+            elif [[ "$BACKUP_DIR" == "$DEFAULT_BACKUP_DIR" ]]; then
+                BACKUP_DIR="$1"
+            else
+                error "Too many arguments: $1"
+                show_help
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate source path
+if [[ ! -d "$SOURCE_PATH" ]]; then
+    error "Source path does not exist: $SOURCE_PATH"
+    exit 1
+fi
 
 # Make sure only root can run this script
 if [[ "$(id -u)" != "0" ]]; then
@@ -107,6 +192,7 @@ if [[ $HOSTNAME == "lithium" ]]; then
     fi
 fi
 
+# Create backup directory with hostname subdirectory
 BACKUP_DIR="${BACKUP_DIR%/}/$HOSTNAME";
 
 # Check for backup directory
@@ -118,27 +204,24 @@ else
     msg "Backing up to: "${BACKUP_DIR};
 fi
 
-# Check for excludes file
-EXCLUDES=""
-echo $EXCLUDE_FILE_NAME
-if [[ ! -f $EXCLUDE_FILE_NAME ]]; then
-    msg "Not using excludes file"
-else
-    msg "Using excludes file: $EXCLUDE_FILE_NAME"
-    EXCLUDES="--exclude-from=${EXCLUDE_FILE_NAME}"
-fi
+# Built-in exclusion patterns
+EXCLUDES="--exclude=/opt --exclude=/proc/* --exclude=/sys/* --exclude=/mnt/* --exclude=/media/* --exclude=/dev/* --exclude=/tmp/* --exclude=/data/* --exclude=/var/tmp/* --exclude=/var/abs/* --exclude=/run/* --exclude=/usr/* --exclude=*/lost+found --exclude=/home/*/.thumbnails --exclude=/home/*/.gvfs --exclude=/home/*/**/Trash/* --exclude=/home/*/.npm --exclude=/home/*/.[cC]*ache --exclude=/home/*/**/*Cache* --exclude=/home/*/.netflix* --exclude=/home/*/.dbus --exclude=/home/*/.cargo"
+msg "Using built-in exclusion patterns"
 
 FILENAME=$(echo $HOSTNAME)_backup_`uname -r`_$(date +%m%d%Y).tar.xz;
 
-# Remove the last backup if the backups number $REFRESH
-cd "${BACKUP_DIR}";
-count=`\ls -tr | wc -l`;
-if [[ $count -gt $REFRESH ]]; then
-    for ((a=1; a <= $count-$REFRESH; a++)); do
-        FILE=`\ls -tr | head -n 1`;
-        rm ${FILE} 2>&1;
-        msg "Deleted "${FILE};
-    done
+# Remove old backups if cleanup is enabled
+if [[ "$CLEANUP_BACKUPS" == true ]]; then
+    cd "${BACKUP_DIR}";
+    count=`\ls -tr | wc -l`;
+    if [[ $count -gt $REFRESH ]]; then
+        msg2 "Cleaning up old backups (keeping last $REFRESH)";
+        for ((a=1; a <= $count-$REFRESH; a++)); do
+            FILE=`\ls -tr | head -n 1`;
+            rm ${FILE} 2>&1;
+            msg "Deleted "${FILE};
+        done
+    fi
 fi
 
 cat /dev/null > /root/backuplog.txt;
@@ -146,7 +229,7 @@ cat /dev/null > /root/backuplog-error.txt;
 
 CALC="Calculating backup file list size... ";
 msgr "${CALC}";
-(tar "${EXCLUDES}" -cvpPf /dev/null / > /tmp/logsize) &
+(tar ${EXCLUDES} -cvpPf /dev/null "$SOURCE_PATH" > /tmp/logsize) &
 PID1=$!
 
 while [[ `ps -p $PID1 -o pid=` ]]; do
@@ -162,7 +245,7 @@ FIN_SIZE=`du /tmp/logsize | cut -f 1`;
 BACKM="Performing backup... ";
 msgr "${BACKM}";
 BACKUP_START_TIME=$(date +%s)
-(tar --xz ${EXCLUDES} -cvpPf ${BACKUP_DIR}/${FILENAME} / \
+(tar --xz ${EXCLUDES} -cvpPf ${BACKUP_DIR}/${FILENAME} "$SOURCE_PATH" \
     2> /root/backuplog-error.txt > /root/backuplog.txt;) &
 PID2=$!
 
@@ -254,16 +337,20 @@ zip backuplog.zip backuplog.txt backuplog-error.txt &> /dev/null;
 
 if [[ $TAR_EXIT_CODE > 1 ]]; then
     error "The backup was not successful!";
-    msg2 "Sending log to ${EMAIL}...";
-    send_email "A problem occurred during backup.\n\nExit code: \
+    if [[ "$SEND_EMAIL" == true ]]; then
+        msg2 "Sending log to ${EMAIL}...";
+        send_email "A problem occurred during backup.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
 ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-    "$HOSTNAME Backup FAILED" backuplog.zip;
-    msg2 "Done";
+        "$HOSTNAME Backup FAILED" backuplog.zip;
+        msg2 "Done";
+    fi
 else
     msg2 "Backup completed successfully.";
-    msg2 "Sending log to ${EMAIL}...";
-    send_email "Backup completed successfully.\n\nExit code: \
+    if [[ "$SEND_EMAIL" == true ]]; then
+        msg2 "Sending log to ${EMAIL}...";
+        send_email "Backup completed successfully.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
 ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-    "$HOSTNAME Backup SUCCESSFUL" backuplog.zip;
-    msg2 "Done";
+        "$HOSTNAME Backup SUCCESSFUL" backuplog.zip;
+        msg2 "Done";
+    fi
 fi
