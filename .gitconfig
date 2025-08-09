@@ -1,0 +1,36 @@
+[user]
+	name = Jesus Alvarez
+	email = jesusalv@rez.codes
+[core]
+	autocrlf = false
+[color]
+	diff = auto
+	status = auto
+	branch = auto
+[push]
+	default = simple
+[http]
+	sslVerify = true
+[credential]
+	helper = cache --timeout=100000
+[merge]
+	tool = vimdiff
+[mergetool]
+    prompt = true
+[mergetool "vimdiff"]
+    cmd = nvim -d $BASE $LOCAL $REMOTE $MERGED -c '$wincmd w' -c 'wincmd J'
+[pull]
+	rebase = true
+[init]
+	defaultBranch = main
+[alias]
+    lg1 = log --graph --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold green)(%ar)%C(reset) %C(white)%s%C(reset) %C(red)- %an%C(reset)%C(bold magenta)%d%C(reset)' --all
+    lg2 = log --graph --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold cyan)%aD%C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(red)- %an%C(reset)' --all
+    lg = !"git lg1"
+    tree = log --all --graph --decorate=short --color --format=format:'%C(bold blue)%h%C(reset) %C(auto)%d%C(reset)\n         %C(white)[%cr]%C(reset)  %x09%C(white)%an: %s %C(reset)'
+[commit]
+	verbose = true
+[safe]
+	directory = /opt/esp-idf
+	directory = /opt/esp-idf/components/openthread/openthread
+
