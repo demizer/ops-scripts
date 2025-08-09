@@ -16,8 +16,6 @@ DEFAULT_SOURCE_PATH="/"
 # Keep only the last N backups
 if [[ -n "$CUSTOM_KEEP" ]]; then
     REFRESH="$CUSTOM_KEEP"
-elif [[ $HOSTNAME == "lithium" ]]; then
-    REFRESH=6;
 else
     REFRESH=4;
 fi
@@ -103,7 +101,7 @@ ARGUMENTS:
 OPTIONS:
     -h, --help      Show this help message
     -e, --email     Email address for notifications (default: nas@alva.rez.codes)
-    -k, --keep      Number of old backups to keep (default: 4 or 6 for lithium)
+    -k, --keep      Number of old backups to keep (default: 4)
     --no-email      Disable email notifications
     --no-cleanup    Don't remove old backups
 
@@ -177,21 +175,6 @@ if [[ "$(id -u)" != "0" ]]; then
    exit 1;
 fi
 
-# Make sure the raid pool is mounted if on lithium
-if [[ $HOSTNAME == "lithium" ]]; then
-    MOUNT=`mount | grep /mnt/data`;
-    if [[ ${MOUNT} == "" ]]; then
-        error "bigdata zpool is not mounted!";
-        msg2 "Sending email to \"$EMAIL\"...";
-        send_email "backup-tar could not find the bigdata zpool!" \
-            "bigdata zpool not mounted on lithium!";
-        msg2 "Done";
-        exit 1;
-    else
-        msg "bigdata zpool detected";
-    fi
-fi
-
 # Create backup directory with hostname subdirectory
 BACKUP_DIR="${BACKUP_DIR%/}/$HOSTNAME";
 
@@ -205,8 +188,11 @@ else
 fi
 
 # Built-in exclusion patterns
-EXCLUDES="--exclude=/opt --exclude=/proc/* --exclude=/sys/* --exclude=/mnt/* --exclude=/media/* --exclude=/dev/* --exclude=/tmp/* --exclude=/data/* --exclude=/var/tmp/* --exclude=/var/abs/* --exclude=/run/* --exclude=/usr/* --exclude=*/lost+found --exclude=/home/*/.thumbnails --exclude=/home/*/.gvfs --exclude=/home/*/**/Trash/* --exclude=/home/*/.npm --exclude=/home/*/.[cC]*ache --exclude=/home/*/**/*Cache* --exclude=/home/*/.netflix* --exclude=/home/*/.dbus --exclude=/home/*/.cargo"
+# EXCLUDES="--exclude=/opt --exclude=/proc/* --exclude=/sys/* --exclude=/mnt/* --exclude=/media/* --exclude=/dev/* --exclude=/tmp/* --exclude=/data/* --exclude=/var/tmp/* --exclude=/var/abs/* --exclude=/run/* --exclude=/usr/* --exclude=*/lost+found --exclude=/home/*/.thumbnails --exclude=/home/*/.gvfs --exclude=/home/*/**/Trash/* --exclude=/home/*/.npm --exclude=/home/*/.[cC]*ache --exclude=/home/*/**/*Cache* --exclude=/home/*/.netflix* --exclude=/home/*/.dbus --exclude=/home/*/.cargo"
+EXCLUDES="--exclude=${SOURCE_PATH}/opt --exclude=${SOURCE_PATH}/proc/* --exclude=${SOURCE_PATH}/sys/* --exclude=${SOURCE_PATH}/mnt/* --exclude=${SOURCE_PATH}/media/* --exclude=${SOURCE_PATH}/dev/* --exclude=${SOURCE_PATH}/tmp/* --exclude=${SOURCE_PATH}/data/* --exclude=${SOURCE_PATH}/var/tmp/* --exclude=${SOURCE_PATH}/var/abs/* --exclude=${SOURCE_PATH}/run/* --exclude=${SOURCE_PATH}/usr/* --exclude=${SOURCE_PATH}*/lost+found --exclude=${SOURCE_PATH}/home/*/.thumbnails --exclude=${SOURCE_PATH}/home/*/.gvfs --exclude=${SOURCE_PATH}/home/*/**/Trash/* --exclude=${SOURCE_PATH}/home/*/.npm --exclude=${SOURCE_PATH}/home/*/.[cC]*ache --exclude=${SOURCE_PATH}/home/*/**/*Cache* --exclude=${SOURCE_PATH}/home/*/.netflix* --exclude=${SOURCE_PATH}/home/*/.dbus --exclude=${SOURCE_PATH}/home/*/.cargo"
+
 msg "Using built-in exclusion patterns"
+msg "EXCLUDES=${EXCLUDES}"
 
 FILENAME=$(echo $HOSTNAME)_backup_`uname -r`_$(date +%m%d%Y).tar.xz;
 
@@ -224,15 +210,15 @@ if [[ "$CLEANUP_BACKUPS" == true ]]; then
     fi
 fi
 
-cat /dev/null > /root/backuplog.txt;
-cat /dev/null > /root/backuplog-error.txt;
+cat /dev/null > backuplog.txt;
+cat /dev/null > backuplog-error.txt;
 
 CALC="Calculating backup file list size... ";
-msgr "${CALC}";
 (tar ${EXCLUDES} -cvpPf /dev/null "$SOURCE_PATH" > /tmp/logsize) &
 PID1=$!
-
-while [[ `ps -p $PID1 -o pid=` ]]; do
+# msg "PID1=${PID1}"
+msgr "${CALC}";
+while [[ $(ps -p $PID1 -o pid=) ]]; do
     sleep 0.25;
     SIZE=`du /tmp/logsize | cut -f 1`;
     FSIZE=`printf "%'d" "${SIZE}"`;
@@ -241,12 +227,16 @@ done
 echo;
 
 FIN_SIZE=`du /tmp/logsize | cut -f 1`;
+if [[ -z ${FIN_SIZE} ]]; then
+    error "Don't have a size to calculate!"
+    exit 1;
+fi
 
 BACKM="Performing backup... ";
 msgr "${BACKM}";
 BACKUP_START_TIME=$(date +%s)
 (tar --xz ${EXCLUDES} -cvpPf ${BACKUP_DIR}/${FILENAME} "$SOURCE_PATH" \
-    2> /root/backuplog-error.txt > /root/backuplog.txt;) &
+    2> backuplog-error.txt > backuplog.txt;) &
 PID2=$!
 
 PREV_SIZE=0
@@ -257,22 +247,22 @@ SPINNER_INDEX=0
 while [[ `ps -p $PID2 -o pid=` ]]; do
     sleep 0.5;
     CURRENT_TIME=$(date +%s)
-    
+
     # Get spinner character
     SPINNER_CHAR=${SPINNER_CHARS:$SPINNER_INDEX:1}
     SPINNER_INDEX=$(( (SPINNER_INDEX + 1) % 4 ))
-    
+
     # Count files processed (lines in log)
-    if [[ -f "/root/backuplog.txt" ]]; then
-        FILE_COUNT=$(wc -l < "/root/backuplog.txt" 2>/dev/null || echo 0)
+    if [[ -f "backuplog.txt" ]]; then
+        FILE_COUNT=$(wc -l < "backuplog.txt" 2>/dev/null || echo 0)
     else
         FILE_COUNT=0
     fi
-    
+
     if [[ -f "${BACKUP_DIR}/${FILENAME}" ]]; then
         BACKUP_SIZE_KB=$(du "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
         BACKUP_SIZE_MB=$((BACKUP_SIZE_KB / 1024))
-        
+
         # Calculate speed in MB/s
         TIME_DIFF=$((CURRENT_TIME - PREV_TIME))
         if [[ $TIME_DIFF -gt 0 ]]; then
@@ -284,12 +274,12 @@ while [[ `ps -p $PID2 -o pid=` ]]; do
         else
             SPEED_MBS=0
         fi
-        
+
         # Calculate percentage based on log file size
-        LOG_SIZE=`du /root/backuplog.txt | cut -f 1`;
+        LOG_SIZE=`du backuplog.txt | cut -f 1`;
         PERC=$(( ${LOG_SIZE} * 100 / ${FIN_SIZE} ));
         FPERC=`printf "%2d" ${PERC}`;
-        
+
         # Create progress bar (20 chars wide)
         PROGRESS_WIDTH=20
         FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
@@ -300,13 +290,13 @@ while [[ `ps -p $PID2 -o pid=` ]]; do
         for ((i=FILLED_WIDTH; i<PROGRESS_WIDTH; i++)); do
             PROGRESS_BAR+=" "
         done
-        
+
         printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${BACKUP_SIZE_MB}MB ${SPEED_MBS}MB/s ${SPINNER_CHAR}${ALL_OFF}" >&2;
     else
-        LOG_SIZE=`du /root/backuplog.txt | cut -f 1`;
+        LOG_SIZE=`du backuplog.txt | cut -f 1`;
         PERC=$(( ${LOG_SIZE} * 100 / ${FIN_SIZE} ));
         FPERC=`printf "%2d" ${PERC}`;
-        
+
         # Create progress bar (20 chars wide)
         PROGRESS_WIDTH=20
         FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
@@ -317,7 +307,7 @@ while [[ `ps -p $PID2 -o pid=` ]]; do
         for ((i=FILLED_WIDTH; i<PROGRESS_WIDTH; i++)); do
             PROGRESS_BAR+=" "
         done
-        
+
         printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${SPINNER_CHAR}${ALL_OFF}" >&2;
     fi
 done
@@ -326,8 +316,6 @@ echo;
 wait $PID2
 TAR_EXIT_CODE=$?
 TAR_FILE_SIZE=`du -h "${BACKUP_DIR}/${FILENAME}" | cut -f 1`
-
-cd /root;
 
 msg2 "Compressing backuplog.txt...";
 if [[ -f backuplog.zip ]]; then
