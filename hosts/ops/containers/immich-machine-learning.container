@@ -10,4 +10,3 @@ Volume=immich-model-cache:/cache:Z
 
 [Install]
 WantedBy=default.target
-

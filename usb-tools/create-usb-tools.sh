@@ -7,54 +7,58 @@
 # Color output functions (matching other scripts)
 unset ALL_OFF BOLD BLUE GREEN RED YELLOW
 
-if tput setaf 0 &>/dev/null; then
-    ALL_OFF="$(tput sgr0)";
-    BOLD="$(tput bold)";
-    BLUE="${BOLD}$(tput setaf 4)";
-    GREEN="${BOLD}$(tput setaf 2)";
-    RED="${BOLD}$(tput setaf 1)";
-    YELLOW="${BOLD}$(tput setaf 3)";
+if tput setaf 0 &> /dev/null; then
+    ALL_OFF="$(tput sgr0)"
+    BOLD="$(tput bold)"
+    BLUE="${BOLD}$(tput setaf 4)"
+    GREEN="${BOLD}$(tput setaf 2)"
+    RED="${BOLD}$(tput setaf 1)"
+    YELLOW="${BOLD}$(tput setaf 3)"
 else
-    ALL_OFF="\\e[1;0m";
-    BOLD="\\e[1;1m";
-    BLUE="${BOLD}\\e[1;34m";
-    GREEN="${BOLD}\\e[1;32m";
-    RED="${BOLD}\\e[1;31m";
-    YELLOW="${BOLD}\\e[1;33m";
+    ALL_OFF="\\e[1;0m"
+    BOLD="\\e[1;1m"
+    BLUE="${BOLD}\\e[1;34m"
+    GREEN="${BOLD}\\e[1;32m"
+    RED="${BOLD}\\e[1;31m"
+    YELLOW="${BOLD}\\e[1;33m"
 fi
 
-readonly ALL_OFF BOLD BLUE GREEN RED YELLOW;
+readonly ALL_OFF BOLD BLUE GREEN RED YELLOW
 
 msg() {
-    local mesg=$1; shift
-    printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 msg2() {
-    local mesg=$1; shift
-    printf "${BLUE}  ->${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${BLUE}  ->${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 warning() {
-    local mesg=$1; shift
-    printf "${YELLOW}==> WARNING:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${YELLOW}==> WARNING:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 error() {
-    local mesg=$1; shift
-    printf "${RED}==> ERROR:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${RED}==> ERROR:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 # Check if running as root
 if [[ "$(id -u)" != "0" ]]; then
-    error "This script must be run as root";
-    exit 1;
+    error "This script must be run as root"
+    exit 1
 fi
 
 # Check if running on Arch Linux
 if [[ ! -f /etc/arch-release ]]; then
-    error "This script must be run on Arch Linux";
-    exit 1;
+    error "This script must be run on Arch Linux"
+    exit 1
 fi
 
 # Configuration
@@ -86,18 +90,18 @@ PACKAGES=(
     msmtp
 
     # Network debugging and analysis tools
-    bind                  # dig, nslookup, host
-    traceroute mtr        # Network path tracing
-    nmap                  # Network scanning
-    tcpdump               # Packet capture and analysis
-    iftop nethogs         # Network usage monitoring
-    ethtool               # Ethernet interface configuration
-    bridge-utils          # Bridge configuration utilities
-    wireless_tools        # iwconfig, iwlist for WiFi
-    wpa_supplicant        # WiFi authentication
-    openbsd-netcat        # Network connectivity testing
-    socat                 # Socket relay and tunneling
-    iperf3 iperf          # Network performance testing
+    bind           # dig, nslookup, host
+    traceroute mtr # Network path tracing
+    nmap           # Network scanning
+    tcpdump        # Packet capture and analysis
+    iftop nethogs  # Network usage monitoring
+    ethtool        # Ethernet interface configuration
+    bridge-utils   # Bridge configuration utilities
+    wireless_tools # iwconfig, iwlist for WiFi
+    wpa_supplicant # WiFi authentication
+    openbsd-netcat # Network connectivity testing
+    socat          # Socket relay and tunneling
+    iperf3 iperf   # Network performance testing
 
     # File system tools
     e2fsprogs dosfstools ntfs-3g
@@ -134,24 +138,24 @@ PACKAGES=(
     ncdu
 
     # Tools needed by ops-scripts and self-reproduction
-    arch-install-scripts    # pacstrap, genfstab, arch-chroot
-    gptfdisk               # sgdisk for partitioning
-    dosfstools             # mkfs.fat for EFI partition
-    libarchive             # bsdtar for archive operations
-    squashfs-tools         # unsquashfs (if needed for ISO operations)
+    arch-install-scripts # pacstrap, genfstab, arch-chroot
+    gptfdisk             # sgdisk for partitioning
+    dosfstools           # mkfs.fat for EFI partition
+    libarchive           # bsdtar for archive operations
+    squashfs-tools       # unsquashfs (if needed for ISO operations)
 
     # Build and development tools
-    base-devel             # Essential build tools
-    python python-pip      # For Python scripts
+    base-devel        # Essential build tools
+    python python-pip # For Python scripts
 
     # Additional system tools
-    lsof strace ltrace     # System debugging
+    lsof strace ltrace # System debugging
 
     # Backup and sync tools (for ops-scripts)
-    rsync rclone          # File synchronization
+    rsync rclone # File synchronization
 
     # Compression tools
-    p7zip unrar           # Additional archive formats
+    p7zip unrar # Additional archive formats
 )
 
 show_help() {
@@ -182,7 +186,7 @@ BRIDGE_PASSWORD=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
@@ -190,7 +194,7 @@ while [[ $# -gt 0 ]]; do
             DEVICE="$2"
             shift 2
             ;;
-        -f|--force)
+        -f | --force)
             FORCE=true
             shift
             ;;
@@ -227,7 +231,7 @@ msg "Creating USB Tools System on $DEVICE"
 
 # Show device information
 msg2 "Target device info:"
-lsblk "$DEVICE" 2>/dev/null | sed 's/^/    /' || {
+lsblk "$DEVICE" 2> /dev/null | sed 's/^/    /' || {
     error "Failed to read device information"
     exit 1
 }
@@ -247,13 +251,13 @@ msg "Starting USB tools system creation..."
 
 # Function to cleanup on exit
 cleanup() {
-    if mountpoint -q "$MOUNT_ROOT" 2>/dev/null; then
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
         msg2 "Cleaning up: unmounting $MOUNT_ROOT"
-        umount -R "$MOUNT_ROOT" 2>/dev/null
+        umount -R "$MOUNT_ROOT" 2> /dev/null
     fi
-    if mountpoint -q "$MOUNT_EFI" 2>/dev/null; then
+    if mountpoint -q "$MOUNT_EFI" 2> /dev/null; then
         msg2 "Cleaning up: unmounting $MOUNT_EFI"
-        umount "$MOUNT_EFI" 2>/dev/null
+        umount "$MOUNT_EFI" 2> /dev/null
     fi
 }
 
@@ -270,13 +274,13 @@ partition_device() {
     for part in "${DEVICE}"*; do
         if [[ "$part" != "$DEVICE" ]]; then
             # Force unmount if mounted
-            if mountpoint -q "$part" 2>/dev/null; then
+            if mountpoint -q "$part" 2> /dev/null; then
                 msg2 "Unmounting $part"
-                umount "$part" 2>/dev/null || umount -f "$part" 2>/dev/null || true
+                umount "$part" 2> /dev/null || umount -f "$part" 2> /dev/null || true
             fi
 
             # Also check if it's used by any process
-            fuser -km "$part" 2>/dev/null || true
+            fuser -km "$part" 2> /dev/null || true
         fi
     done
 
@@ -291,10 +295,10 @@ partition_device() {
 
     # Create partitions: 1GB EFI + 2GB swap + remainder ext4
     sgdisk --clear \
-           --new=1:1MiB:+1GiB --typecode=1:ef00 --change-name=1:ARCHISO_EFI \
-           --new=2:0:+2GiB --typecode=2:8200 --change-name=2:ARCHISO_SWAP \
-           --new=3:0:0 --typecode=3:8300 --change-name=3:ARCHISO_ROOT \
-           "$DEVICE" || {
+        --new=1:1MiB:+1GiB --typecode=1:ef00 --change-name=1:ARCHISO_EFI \
+        --new=2:0:+2GiB --typecode=2:8200 --change-name=2:ARCHISO_SWAP \
+        --new=3:0:0 --typecode=3:8300 --change-name=3:ARCHISO_ROOT \
+        "$DEVICE" || {
         error "Failed to create partitions"
         return 1
     }
@@ -309,7 +313,7 @@ partition_device() {
     sleep 3
 
     # Force kernel to re-read partition table
-    blockdev --rereadpt "$DEVICE" 2>/dev/null || true
+    blockdev --rereadpt "$DEVICE" 2> /dev/null || true
     sync
     sleep 2
 
@@ -348,13 +352,13 @@ format_partitions() {
 
     # Ensure partitions are not in use before formatting
     for part in "$EFI_PART" "$SWAP_PART" "$ROOT_PART"; do
-        if mountpoint -q "$part" 2>/dev/null; then
+        if mountpoint -q "$part" 2> /dev/null; then
             msg2 "Force unmounting $part"
-            umount -f "$part" 2>/dev/null || true
+            umount -f "$part" 2> /dev/null || true
         fi
 
         # Kill any processes using the partition
-        fuser -km "$part" 2>/dev/null || true
+        fuser -km "$part" 2> /dev/null || true
 
         # Wait for processes to die
         sleep 1
@@ -376,7 +380,7 @@ format_partitions() {
         error "Try unplugging and replugging the USB device, then run again"
         return 1
     }
-    
+
     # Sync swap partition creation
     sync
 
@@ -453,7 +457,7 @@ configure_system() {
         error "Failed to generate fstab"
         return 1
     }
-    
+
     # Ensure no conflicting swap entries exist
     msg2 "Cleaning up fstab for proper swap configuration..."
     # Remove any swapfile entries that might interfere
@@ -480,7 +484,7 @@ configure_system() {
     arch-chroot "$MOUNT_ROOT" systemctl enable sshd
     arch-chroot "$MOUNT_ROOT" systemctl enable systemd-networkd
     arch-chroot "$MOUNT_ROOT" systemctl enable systemd-resolved
-    
+
     # Configure automatic wired network connection
     msg2 "Configuring automatic wired network connection..."
     mkdir -p "$MOUNT_ROOT/etc/systemd/network"
@@ -495,14 +499,14 @@ IPv6AcceptRA=yes
 [DHCP]
 RouteMetric=10
 EOF
-    
+
     # Disable any automatic swapfile creation services
     arch-chroot "$MOUNT_ROOT" systemctl mask systemd-swap || true
-    
+
     # Ensure no existing swap configuration files interfere
-    rm -f "$MOUNT_ROOT/etc/systemd/swap.conf" 2>/dev/null || true
-    rm -f "$MOUNT_ROOT/etc/systemd/swap.conf.d/"* 2>/dev/null || true
-    
+    rm -f "$MOUNT_ROOT/etc/systemd/swap.conf" 2> /dev/null || true
+    rm -f "$MOUNT_ROOT/etc/systemd/swap.conf.d/"* 2> /dev/null || true
+
     # Configure SSH for better rsync/scp support
     msg2 "Configuring SSH server..."
     mkdir -p "$MOUNT_ROOT/etc/ssh/sshd_config.d"
@@ -537,18 +541,18 @@ PubkeyAuthentication yes
 # Optimize for LAN usage
 UseDNS no
 EOF
-    
+
     # Generate SSH host keys
     arch-chroot "$MOUNT_ROOT" ssh-keygen -A
-    
+
     # Set up convenient directory structure for file transfers
     mkdir -p "$MOUNT_ROOT/workspace/uploads"
     mkdir -p "$MOUNT_ROOT/workspace/downloads"
-    
+
     # Create .ssh directory for root
     mkdir -p "$MOUNT_ROOT/root/.ssh"
     chmod 700 "$MOUNT_ROOT/root/.ssh"
-    
+
     # Create a info file for SSH users
     cat > "$MOUNT_ROOT/root/README-ssh.txt" << 'EOF'
 SSH Access Information:
@@ -602,7 +606,7 @@ setup_bootloader() {
     if [[ "$MEMTEST_INSTALLED" == false ]]; then
         msg2 "Memtest86+ EFI binary not found in expected locations - checking system..."
         # Try to find memtest anywhere in the system
-        if memtest_found=$(find "$MOUNT_ROOT" -name "memtest*.efi" -type f 2>/dev/null | head -1); then
+        if memtest_found=$(find "$MOUNT_ROOT" -name "memtest*.efi" -type f 2> /dev/null | head -1); then
             if [[ -n "$memtest_found" ]]; then
                 mkdir -p "$MOUNT_ROOT/boot/memtest86+"
                 cp "$memtest_found" "$MOUNT_ROOT/boot/memtest86+/memtest.efi"
@@ -716,8 +720,8 @@ ExecStart=
 ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin root %I $TERM
 EOF
 
-    # Set fish as default shell for root
-    arch-chroot "$MOUNT_ROOT" chsh -s /usr/bin/fish root
+    # Set bash as default shell for root (rsync compatibility)
+    arch-chroot "$MOUNT_ROOT" chsh -s /bin/bash root
 
     # Create fish configuration directory
     mkdir -p "$MOUNT_ROOT/root/.config/fish"
@@ -725,7 +729,7 @@ EOF
     # Set up neovim configuration
     msg2 "Setting up neovim configuration..."
     mkdir -p "$MOUNT_ROOT/root/.config/nvim"
-    
+
     # Copy the nvim.lua configuration as init.lua
     if [[ -f "$HOME/.config/nvim/nvim.lua" ]]; then
         cp "$HOME/.config/nvim/nvim.lua" "$MOUNT_ROOT/root/.config/nvim/init.lua"
@@ -824,6 +828,9 @@ echo "Network: SSH daemon is enabled and running"
 echo "Username: root"
 echo "Password: alvaone"
 echo
+echo "Shell: Default is bash (rsync compatible)"
+echo "       Type 'fish' to start fish shell with tmux"
+echo
 EOF
 
     chmod +x "$MOUNT_ROOT/root/motd.sh"
@@ -868,7 +875,7 @@ copy_ops_scripts() {
             cp "$file" "$dest_file"
             ((copied_count++))
         fi
-    done < <(git ls-files -z 2>/dev/null)
+    done < <(git ls-files -z 2> /dev/null)
 
     # Copy .git directory
     if [[ -d "$ops_scripts_dir/.git" ]]; then
@@ -919,7 +926,7 @@ sleep 2
 
 # Sync filesystem buffers for the specific device
 if command -v fsync &> /dev/null; then
-    fsync "$MOUNT_ROOT" 2>/dev/null || true
+    fsync "$MOUNT_ROOT" 2> /dev/null || true
 fi
 
 # Additional sync for good measure

@@ -32,14 +32,14 @@ excludes=(
 
 args=(
     "--verbose"
-    "--archive" # Archive. equiv to -rlptgoD
-    "--acls" # Preserve acls. implies --perms
-    "--xattrs" # Preserve extended attributes
-    "--partial" # keep partially transfered files
-    "--progress" # show progress
-    "--hard-links" # preserve hard links
+    "--archive"        # Archive. equiv to -rlptgoD
+    "--acls"           # Preserve acls. implies --perms
+    "--xattrs"         # Preserve extended attributes
+    "--partial"        # keep partially transfered files
+    "--progress"       # show progress
+    "--hard-links"     # preserve hard links
     "--human-readable" # Output numbers in human readable format
-    "--delete-after"
+    # "--delete-after"
 )
 
 flagged_excludes=()

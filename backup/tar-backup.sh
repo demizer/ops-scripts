@@ -17,59 +17,65 @@ DEFAULT_SOURCE_PATH="/"
 if [[ -n "$CUSTOM_KEEP" ]]; then
     REFRESH="$CUSTOM_KEEP"
 else
-    REFRESH=4;
+    REFRESH=4
 fi
 
 # check if messages are to be printed using color
 unset ALL_OFF BOLD BLUE GREEN RED YELLOW
 
 # prefer terminal safe colored and bold text when tput is supported
-if tput setaf 0 &>/dev/null; then
-    ALL_OFF="$(tput sgr0)";
-    BOLD="$(tput bold)";
-    BLUE="${BOLD}$(tput setaf 4)";
-    GREEN="${BOLD}$(tput setaf 2)";
-    RED="${BOLD}$(tput setaf 1)";
-    YELLOW="${BOLD}$(tput setaf 3)";
+if tput setaf 0 &> /dev/null; then
+    ALL_OFF="$(tput sgr0)"
+    BOLD="$(tput bold)"
+    BLUE="${BOLD}$(tput setaf 4)"
+    GREEN="${BOLD}$(tput setaf 2)"
+    RED="${BOLD}$(tput setaf 1)"
+    YELLOW="${BOLD}$(tput setaf 3)"
 else
-    ALL_OFF="\e[1;0m";
-    BOLD="\e[1;1m";
-    BLUE="${BOLD}\e[1;34m";
-    GREEN="${BOLD}\e[1;32m";
-    RED="${BOLD}\e[1;31m";
-    YELLOW="${BOLD}\e[1;33m";
+    ALL_OFF="\e[1;0m"
+    BOLD="\e[1;1m"
+    BLUE="${BOLD}\e[1;34m"
+    GREEN="${BOLD}\e[1;32m"
+    RED="${BOLD}\e[1;31m"
+    YELLOW="${BOLD}\e[1;33m"
 fi
 
-readonly ALL_OFF BOLD BLUE GREEN RED YELLOW;
+readonly ALL_OFF BOLD BLUE GREEN RED YELLOW
 
 plain() {
-	local mesg=$1; shift
-	printf "${BOLD}    ${mesg}${ALL_OFF}\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${BOLD}    ${mesg}${ALL_OFF}\n" "$@" >&2
 }
 
 msg() {
-	local mesg=$1; shift
-	printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
 }
 
 msgr() {
-	local mesg=$1; shift
-	printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\r" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\r" "$@" >&2
 }
 
 msg2() {
-	local mesg=$1; shift
-	printf "${BLUE}  ->${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${BLUE}  ->${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
 }
 
 warning() {
-	local mesg=$1; shift
-	printf "${YELLOW}==> "WARNING:"${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${YELLOW}==> "WARNING:"${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
 }
 
 error() {
-	local mesg=$1; shift
-	printf "${RED}==> "ERROR:"${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${RED}==> "ERROR:"${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\n" "$@" >&2
 }
 
 # $1 = Message
@@ -79,11 +85,11 @@ send_email() {
     if [[ "$SEND_EMAIL" != true ]]; then
         return 0
     fi
-    
+
     if [[ $3 == "" ]]; then
-        echo -e "${1}" | mail -s "${2}" "${EMAIL}" &> /dev/null;
+        echo -e "${1}" | mail -s "${2}" "${EMAIL}" &> /dev/null
     else
-        echo -e "${1}" | uuencode "${3}" "$(basename "${3}")" | mail -s "${2}" "${EMAIL}" &> /dev/null;
+        echo -e "${1}" | uuencode "${3}" "$(basename "${3}")" | mail -s "${2}" "${EMAIL}" &> /dev/null
     fi
 }
 
@@ -123,15 +129,15 @@ CUSTOM_KEEP=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
-        -e|--email)
+        -e | --email)
             EMAIL="$2"
             shift 2
             ;;
-        -k|--keep)
+        -k | --keep)
             CUSTOM_KEEP="$2"
             shift 2
             ;;
@@ -171,20 +177,20 @@ fi
 
 # Make sure only root can run this script
 if [[ "$(id -u)" != "0" ]]; then
-   error "This script must be run as root";
-   exit 1;
+    error "This script must be run as root"
+    exit 1
 fi
 
 # Create backup directory with hostname subdirectory
-BACKUP_DIR="${BACKUP_DIR%/}/$HOSTNAME";
+BACKUP_DIR="${BACKUP_DIR%/}/$HOSTNAME"
 
 # Check for backup directory
 if [[ ! -e ${BACKUP_DIR} ]]; then
-    mkdir -p ${BACKUP_DIR};
-    msg "Created "${BACKUP_DIR};
-    msg2 "Backing up to: "${BACKUP_DIR};
+    mkdir -p ${BACKUP_DIR}
+    msg "Created "${BACKUP_DIR}
+    msg2 "Backing up to: "${BACKUP_DIR}
 else
-    msg "Backing up to: "${BACKUP_DIR};
+    msg "Backing up to: "${BACKUP_DIR}
 fi
 
 # Built-in exclusion patterns
@@ -194,18 +200,18 @@ EXCLUDES="--exclude=${SOURCE_PATH}/opt --exclude=${SOURCE_PATH}/proc/* --exclude
 msg "Using built-in exclusion patterns"
 msg "EXCLUDES=${EXCLUDES}"
 
-FILENAME=$(echo $HOSTNAME)_backup_`uname -r`_$(date +%m%d%Y).tar.xz;
+FILENAME=$(echo $HOSTNAME)_backup_$(uname -r)_$(date +%m%d%Y).tar.xz
 
 # Remove old backups if cleanup is enabled
 if [[ "$CLEANUP_BACKUPS" == true ]]; then
-    cd "${BACKUP_DIR}";
-    count=`\ls -tr | wc -l`;
+    cd "${BACKUP_DIR}"
+    count=$(\ls -tr | wc -l)
     if [[ $count -gt $REFRESH ]]; then
-        msg2 "Cleaning up old backups (keeping last $REFRESH)";
-        for ((a=1; a <= $count-$REFRESH; a++)); do
-            FILE=`\ls -tr | head -n 1`;
-            rm ${FILE} 2>&1;
-            msg "Deleted "${FILE};
+        msg2 "Cleaning up old backups (keeping last $REFRESH)"
+        for ((a = 1; a <= $count - $REFRESH; a++)); do
+            FILE=$(\ls -tr | head -n 1)
+            rm ${FILE} 2>&1
+            msg "Deleted "${FILE}
         done
     fi
 fi
@@ -224,7 +230,7 @@ while [[ $(ps -p $PID1 -o pid=) ]]; do
     FSIZE=`printf "%'d" "${SIZE}"`;
     msgr "${CALC}${FSIZE}K";
 done
-echo;
+echo
 
 FIN_SIZE=`du /tmp/logsize | cut -f 1`;
 if [[ -z ${FIN_SIZE} ]]; then
@@ -232,8 +238,8 @@ if [[ -z ${FIN_SIZE} ]]; then
     exit 1;
 fi
 
-BACKM="Performing backup... ";
-msgr "${BACKM}";
+BACKM="Performing backup... "
+msgr "${BACKM}"
 BACKUP_START_TIME=$(date +%s)
 (tar --xz ${EXCLUDES} -cvpPf ${BACKUP_DIR}/${FILENAME} "$SOURCE_PATH" \
     2> backuplog-error.txt > backuplog.txt;) &
@@ -244,8 +250,8 @@ PREV_TIME=$BACKUP_START_TIME
 SPINNER_CHARS='/-\|'
 SPINNER_INDEX=0
 
-while [[ `ps -p $PID2 -o pid=` ]]; do
-    sleep 0.5;
+while [[ $(ps -p $PID2 -o pid=) ]]; do
+    sleep 0.5
     CURRENT_TIME=$(date +%s)
 
     # Get spinner character
@@ -284,10 +290,10 @@ while [[ `ps -p $PID2 -o pid=` ]]; do
         PROGRESS_WIDTH=20
         FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
         PROGRESS_BAR=""
-        for ((i=0; i<FILLED_WIDTH; i++)); do
+        for ((i = 0; i < FILLED_WIDTH; i++)); do
             PROGRESS_BAR+="="
         done
-        for ((i=FILLED_WIDTH; i<PROGRESS_WIDTH; i++)); do
+        for ((i = FILLED_WIDTH; i < PROGRESS_WIDTH; i++)); do
             PROGRESS_BAR+=" "
         done
 
@@ -301,44 +307,44 @@ while [[ `ps -p $PID2 -o pid=` ]]; do
         PROGRESS_WIDTH=20
         FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
         PROGRESS_BAR=""
-        for ((i=0; i<FILLED_WIDTH; i++)); do
+        for ((i = 0; i < FILLED_WIDTH; i++)); do
             PROGRESS_BAR+="="
         done
-        for ((i=FILLED_WIDTH; i<PROGRESS_WIDTH; i++)); do
+        for ((i = FILLED_WIDTH; i < PROGRESS_WIDTH; i++)); do
             PROGRESS_BAR+=" "
         done
 
         printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${SPINNER_CHAR}${ALL_OFF}" >&2;
     fi
 done
-echo;
+echo
 
 wait $PID2
 TAR_EXIT_CODE=$?
-TAR_FILE_SIZE=`du -h "${BACKUP_DIR}/${FILENAME}" | cut -f 1`
+TAR_FILE_SIZE=$(du -h "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
 
 msg2 "Compressing backuplog.txt...";
 if [[ -f backuplog.zip ]]; then
-    rm -f backuplog.zip;
-fi;
-zip backuplog.zip backuplog.txt backuplog-error.txt &> /dev/null;
+    rm -f backuplog.zip
+fi
+zip backuplog.zip backuplog.txt backuplog-error.txt &> /dev/null
 
 if [[ $TAR_EXIT_CODE > 1 ]]; then
-    error "The backup was not successful!";
+    error "The backup was not successful!"
     if [[ "$SEND_EMAIL" == true ]]; then
-        msg2 "Sending log to ${EMAIL}...";
+        msg2 "Sending log to ${EMAIL}..."
         send_email "A problem occurred during backup.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
 ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-        "$HOSTNAME Backup FAILED" backuplog.zip;
-        msg2 "Done";
+            "$HOSTNAME Backup FAILED" backuplog.zip
+        msg2 "Done"
     fi
 else
-    msg2 "Backup completed successfully.";
+    msg2 "Backup completed successfully."
     if [[ "$SEND_EMAIL" == true ]]; then
-        msg2 "Sending log to ${EMAIL}...";
+        msg2 "Sending log to ${EMAIL}..."
         send_email "Backup completed successfully.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
 ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-        "$HOSTNAME Backup SUCCESSFUL" backuplog.zip;
-        msg2 "Done";
+            "$HOSTNAME Backup SUCCESSFUL" backuplog.zip
+        msg2 "Done"
     fi
 fi

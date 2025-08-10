@@ -7,48 +7,52 @@
 # Color output functions (matching other scripts)
 unset ALL_OFF BOLD BLUE GREEN RED YELLOW
 
-if tput setaf 0 &>/dev/null; then
-    ALL_OFF="$(tput sgr0)";
-    BOLD="$(tput bold)";
-    BLUE="${BOLD}$(tput setaf 4)";
-    GREEN="${BOLD}$(tput setaf 2)";
-    RED="${BOLD}$(tput setaf 1)";
-    YELLOW="${BOLD}$(tput setaf 3)";
+if tput setaf 0 &> /dev/null; then
+    ALL_OFF="$(tput sgr0)"
+    BOLD="$(tput bold)"
+    BLUE="${BOLD}$(tput setaf 4)"
+    GREEN="${BOLD}$(tput setaf 2)"
+    RED="${BOLD}$(tput setaf 1)"
+    YELLOW="${BOLD}$(tput setaf 3)"
 else
-    ALL_OFF="\\e[1;0m";
-    BOLD="\\e[1;1m";
-    BLUE="${BOLD}\\e[1;34m";
-    GREEN="${BOLD}\\e[1;32m";
-    RED="${BOLD}\\e[1;31m";
-    YELLOW="${BOLD}\\e[1;33m";
+    ALL_OFF="\\e[1;0m"
+    BOLD="\\e[1;1m"
+    BLUE="${BOLD}\\e[1;34m"
+    GREEN="${BOLD}\\e[1;32m"
+    RED="${BOLD}\\e[1;31m"
+    YELLOW="${BOLD}\\e[1;33m"
 fi
 
-readonly ALL_OFF BOLD BLUE GREEN RED YELLOW;
+readonly ALL_OFF BOLD BLUE GREEN RED YELLOW
 
 msg() {
-    local mesg=$1; shift
-    printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${GREEN}==>${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 msg2() {
-    local mesg=$1; shift
-    printf "${BLUE}  ->${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${BLUE}  ->${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 warning() {
-    local mesg=$1; shift
-    printf "${YELLOW}==> WARNING:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${YELLOW}==> WARNING:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 error() {
-    local mesg=$1; shift
-    printf "${RED}==> ERROR:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2;
+    local mesg=$1
+    shift
+    printf "${RED}==> ERROR:${ALL_OFF}${BOLD} ${mesg}${ALL_OFF}\\n" "$@" >&2
 }
 
 # Check if running as root
 if [[ "$(id -u)" != "0" ]]; then
-    error "This script must be run as root";
-    exit 1;
+    error "This script must be run as root"
+    exit 1
 fi
 
 # Configuration
@@ -86,7 +90,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
@@ -102,7 +106,7 @@ while [[ $# -gt 0 ]]; do
             TEST_DEVICE="$2"
             shift 2
             ;;
-        -y|--yes)
+        -y | --yes)
             AUTO_YES=true
             shift
             ;;
@@ -128,13 +132,13 @@ msg2 "Test in QEMU: $([[ "$SKIP_TEST" == true ]] && echo "SKIP" || echo "YES")"
 # Step 1: Create USB tools system
 if [[ "$SKIP_BUILD" == false ]]; then
     msg "Step 1: Creating USB tools system"
-    
+
     # Add --device and optional --force flag
     BUILD_ARGS=("--device" "$TEST_DEVICE")
     if [[ "$AUTO_YES" == true ]]; then
         BUILD_ARGS+=("--force")
     fi
-    
+
     if ! "$SCRIPT_DIR/create-usb-tools.sh" "${BUILD_ARGS[@]}"; then
         error "USB tools creation failed"
         exit 1
@@ -150,13 +154,13 @@ msg2 "USB tools system created on device: $TEST_DEVICE"
 # Step 2: Test in QEMU
 if [[ "$SKIP_TEST" == false ]]; then
     msg "Step 2: Testing in QEMU"
-    
+
     # Add common QEMU args
     QEMU_ARGS=("--no-host-networking")
     if [[ "$AUTO_YES" == true ]]; then
         QEMU_ARGS+=("--yes")
     fi
-    
+
     # Test with the USB device
     if ! "$SCRIPT_DIR/test-usb-tools-qemu.sh" "${QEMU_ARGS[@]}" --device "$TEST_DEVICE"; then
         error "QEMU test failed"

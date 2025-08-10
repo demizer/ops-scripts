@@ -16,4 +16,3 @@ Volume=/mnt/pictures/immich:/usr/src/app/upload:Z
 
 [Install]
 WantedBy=default.target
-

@@ -1,2 +1,6 @@
+- These scripts will only be ever used by one user on a few systems, there is no need for complex error recovery logic.
 - Always check commands for exit 0, if a command fails, do not fallback to other techniques just exit 1.
 - Always verify changes and exit non-zero with a meaningful message
+- Shell scripts should not use -e as that causes them to fail on simple logic.
+- All chroot operations targeting an Arch Linux install should use arch-chroot.
+- Echo all commands and flags before use including the source line number.
