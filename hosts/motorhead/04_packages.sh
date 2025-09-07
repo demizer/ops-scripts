@@ -12,8 +12,6 @@ fi
 # Packages explicitly installed on motorhead host
 PACKAGES=(
     7zip
-    annotator
-    archiso
     asciiquarium
     aspell-en
     atuin
@@ -30,15 +28,12 @@ PACKAGES=(
     cpanminus
     cups
     cursor-bin
-    datagrip
-    datagrip-jre
     dconf-editor
     devtools
     docker
     docker-buildx
     docker-compose
     dosfstools
-    dpkg
     dust-git
     e2fsprogs
     efibootmgr
@@ -76,12 +71,9 @@ PACKAGES=(
     hexedit
     htop
     inetutils
-    insomnia
-    jfrog-cli
     jq
     just
     kitty
-    krita
     lazygit
     libfido2
     librecad
@@ -101,9 +93,6 @@ PACKAGES=(
     minicom
     mtr
     mutter
-    mypaint
-    mysql-clients80
-    mysql-workbench
     nautilus
     net-tools
     networkmanager-openconnect
@@ -111,17 +100,12 @@ PACKAGES=(
     nfs-utils
     ngrep
     nmap
-    nomachine
     noto-fonts
     npm
     ntfs-3g
     ntp
-    obs-studio
     obsidian
     openbsd-netcat
-    openconnect
-    openconnect-sso
-    openshot
     openssh
     orca
     pacman-contrib
@@ -130,15 +114,12 @@ PACKAGES=(
     pandoc-cli
     parted
     patch
-    patchelf
     pkgconf
     pop-launcher-git
     postgresql
     postman-bin
     powerline-fonts
-    prettier
     pv
-    pycharm-professional
     pyright
     python
     python-jaraco.classes
@@ -152,8 +133,6 @@ PACKAGES=(
     remmina
     ripgrep
     rsync
-    rustrover
-    rustup
     rygel
     samba
     sbcl
@@ -162,7 +141,6 @@ PACKAGES=(
     sdl2_ttf
     shellcheck
     simple-scan
-    slack-desktop
     solaar
     strace
     sushi
@@ -182,22 +160,26 @@ PACKAGES=(
     unzip
     usbutils
     uv
-    vault
     vifm
     vlc
     wget
     wireguard-tools
     wl-clipboard
-    xf86-input-wacom
-    yubikey-manager
 )
 
 echo "Installing ${#PACKAGES[@]} packages..."
 
 # Update package database
-pacman -Sy --noconfirm
+echo "Updating package database..."
+if ! pacman -Sy --noconfirm; then
+    echo "Failed to update package database" >&2
+    exit 1
+fi
 
 # Install all packages at once - let pacman handle dependencies and conflicts
-pacman -S --needed --noconfirm "${PACKAGES[@]}"
-
-echo "Package installation completed"
+if pacman -S --needed --noconfirm "${PACKAGES[@]}"; then
+    echo "Package installation completed successfully"
+else
+    echo "Package installation failed" >&2
+    exit 1
+fi

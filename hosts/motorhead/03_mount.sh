@@ -6,7 +6,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib.sh"
 
-DEVICE="/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_2TB_S7L9NJ0Y438532K"
+DEVICE="/dev/disk/by-id/nvme-KINGSTON_OM3PGP4128P-AH_0026B7382A48ED90"
 
 # Try to find the actual device name (e.g., /dev/nvme0n1)
 REAL_DEVICE=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")

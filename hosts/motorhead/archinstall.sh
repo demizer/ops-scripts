@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Arch Linux installer for motorhead
-# Sets up a complete Arch Linux system using partition.sh, format.sh, mount.sh, and packages.sh
+# Sets up a complete Arch Linux system using partition.sh, format.sh, mount.sh, and 04_packages.sh
 
 # Load common library functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ fi
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVICE="/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_2TB_S7L9NJ0Y438532K"
+DEVICE="/dev/disk/by-id/nvme-KINGSTON_OM3PGP4128P-AH_0026B7382A48ED90"
 MOUNT_ROOT="/mnt/root"
 HOSTNAME="motorhead"
 
@@ -263,8 +263,6 @@ while [[ $# -gt 0 ]]; do
             STEP_PACKAGES=true
             shift
             ;;
-            shift
-            ;;
         --groups)
             STEP_GROUPS=true
             shift
@@ -384,10 +382,6 @@ if [[ -n "$STEPS_FROM" ]]; then
             STEP_USERS=true
             STEP_SANITY=true
             ;;
-            STEP_GROUPS=true
-            STEP_USERS=true
-            STEP_SANITY=true
-            ;;
         groups)
             STEP_GROUPS=true
             STEP_USERS=true
@@ -425,6 +419,7 @@ msg "All output is being logged to: $PWD/$LOG_FILE"
 
 # Check if any step flags are set
 ANY_STEP_FLAG=false
+for flag in "$STEP_PARTITION" "$STEP_FORMAT" "$STEP_MOUNT" "$STEP_BASE_SYSTEM" "$STEP_CONFIGURE" "$STEP_BOOTLOADER" "$STEP_INITRAMFS" "$STEP_CONFIGURE_PACMAN" "$STEP_PACKAGES" "$STEP_GROUPS" "$STEP_USERS" "$STEP_SANITY"; do
     if [[ "$flag" == true ]]; then
         ANY_STEP_FLAG=true
         break
@@ -510,6 +505,26 @@ cleanup_on_signal() {
 trap 'cleanup_on_signal SIGINT' INT
 trap 'cleanup_on_signal SIGTERM' TERM
 trap ask_unmount_on_exit EXIT
+
+# Helper function for step signposting
+step_begin() {
+    local step_name="$1"
+    local restart_option="$2"
+    echo
+    msg "═══════════════════════════════════════════════════════════════"
+    msg "🔄 STARTING: $step_name"
+    msg "💡 To restart from this step: ./archinstall.sh --steps-from $restart_option"
+    msg "═══════════════════════════════════════════════════════════════"
+}
+
+step_complete() {
+    local step_name="$1"
+    echo
+    msg "═══════════════════════════════════════════════════════════════"
+    msg "✅ COMPLETED: $step_name"
+    msg "═══════════════════════════════════════════════════════════════"
+    echo
+}
 
 # Step 4: Install base system with pacstrap
 install_base_system() {
@@ -636,9 +651,9 @@ EOF
     cat >> "$MOUNT_ROOT/etc/fstab" << 'EOF'
 
 # NFS mounts for alvaone repository and backups
-192.168.5.16:/mnt/bigdata/arch_repo/alvaone_repo         /mnt/arch_repo          nfs4    _netdev,noatime,nodiratime,x-systemd.automount,x-systemd.mount-timeout=10,timeo=600,x-systemd.idle-timeout=1min 0 0
-192.168.5.16:/mnt/bigdata/arch_repo/pac_cache            /mnt/arch_pkg_cache     nfs4    _netdev,noatime,nodiratime,x-systemd.automount,x-systemd.mount-timeout=10,timeo=600,x-systemd.idle-timeout=1min 0 0
-192.168.5.16:/mnt/bigdata/backups                        /mnt/backups            nfs4    _netdev,noatime,nodiratime,x-systemd.automount,x-systemd.mount-timeout=10,timeo=600,x-systemd.idle-timeout=1min 0 0
+nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo     /mnt/arch_repo          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
+nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache        /mnt/arch_pkg_cache     nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
+nas.alvaone.net:/mnt/bigdata/backups                    /mnt/backups            nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
 EOF
 
     # Set hostname
@@ -704,9 +719,6 @@ setup_bootloader() {
     # Install GRUB to EFI partition
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB || {
         err "Failed to install GRUB"
-        return 1
-    }
-
         return 1
     }
 
@@ -780,7 +792,7 @@ Wants=network-online.target
 What=nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo
 Where=/mnt/arch_repo
 Type=nfs
-Options=_netdev,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5
+Options=_netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600
 
 [Install]
 WantedBy=multi-user.target
@@ -797,7 +809,7 @@ Wants=network-online.target
 What=nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache
 Where=/mnt/arch_pkg_cache
 Type=nfs
-Options=_netdev,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5
+Options=_netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600
 
 [Install]
 WantedBy=multi-user.target
@@ -836,7 +848,7 @@ setup_repository_bind_mounts() {
             }
         fi
     else
-        warn "Host alvaone repository not mounted - packages.sh may fail"
+        warn "Host alvaone repository not mounted - 04_packages.sh may fail"
     fi
 
     if mountpoint -q /mnt/arch_pkg_cache 2> /dev/null; then
@@ -848,7 +860,7 @@ setup_repository_bind_mounts() {
             }
         fi
     else
-        warn "Host package cache not mounted - packages.sh may be slower"
+        warn "Host package cache not mounted - 04_packages.sh may be slower"
     fi
 }
 
@@ -867,13 +879,13 @@ cleanup_repository_bind_mounts() {
 install_packages() {
     msg "Installing additional packages..."
 
-    # Check if packages.sh exists
-    if [[ ! -f "$SCRIPT_DIR/packages.sh" ]]; then
-        err "packages.sh not found at $SCRIPT_DIR/packages.sh"
+    # Check if 04_packages.sh exists
+    if [[ ! -f "$SCRIPT_DIR/04_packages.sh" ]]; then
+        err "04_packages.sh not found at $SCRIPT_DIR/04_packages.sh"
     fi
 
     # Debug: Show what we're working with
-    msg "Source: $SCRIPT_DIR/packages.sh"
+    msg "Source: $SCRIPT_DIR/04_packages.sh"
     msg "Mount point: $MOUNT_ROOT"
     msg "Target: $MOUNT_ROOT/root/"
 
@@ -885,25 +897,25 @@ install_packages() {
     # Setup repository bind mounts
     setup_repository_bind_mounts || return 1
 
-    # Copy packages.sh to the new system and run it in chroot
-    cp "$SCRIPT_DIR/packages.sh" "$MOUNT_ROOT/root/" || {
-        err "Failed to copy packages.sh to chroot environment"
+    # Copy 04_packages.sh to the new system and run it in chroot
+    cp "$SCRIPT_DIR/04_packages.sh" "$MOUNT_ROOT/root/" || {
+        err "Failed to copy 04_packages.sh to chroot environment"
     }
-    chmod +x "$MOUNT_ROOT/root/packages.sh"
+    chmod +x "$MOUNT_ROOT/root/04_packages.sh"
 
     # Verify the file was copied successfully
-    if [[ ! -f "$MOUNT_ROOT/root/packages.sh" ]]; then
-        err "packages.sh was not successfully copied to $MOUNT_ROOT/root/"
+    if [[ ! -f "$MOUNT_ROOT/root/04_packages.sh" ]]; then
+        err "04_packages.sh was not successfully copied to $MOUNT_ROOT/root/"
     fi
 
-    msg "Successfully copied packages.sh to chroot environment"
+    msg "Successfully copied 04_packages.sh to chroot environment"
 
     # Run packages installation in chroot with better signal handling
     msg "Running packages installation..."
     msg "Note: This may take a while. Press Ctrl+C to cancel if needed."
 
     # Use a more direct approach that handles signals better
-    if ! arch-chroot "$MOUNT_ROOT" /root/packages.sh --force; then
+    if ! arch-chroot "$MOUNT_ROOT" /root/04_packages.sh --force; then
         # Clean up bind mounts even on failure
         msg "Package installation failed - cleaning up bind mounts..."
         cleanup_repository_bind_mounts
@@ -911,11 +923,12 @@ install_packages() {
     fi
 
     # Clean up
-    rm -f "$MOUNT_ROOT/root/packages.sh"
+    rm -f "$MOUNT_ROOT/root/04_packages.sh"
 
     # Only unmount bind mounts if this is not part of a multi-step run
     # If ANY_STEP_FLAG is false, we're doing a full install and should cleanup
     # If ANY_STEP_FLAG is true and only STEP_PACKAGES is true, we should cleanup
+    if [[ "$ANY_STEP_FLAG" == false ]] || [[ "$STEP_PACKAGES" == true && "$STEP_GROUPS" != true && "$STEP_USERS" != true ]]; then
         cleanup_repository_bind_mounts
     else
         msg "Keeping bind mounts for subsequent steps"
@@ -931,28 +944,18 @@ install_packages() {
     msg "Package installation completed"
 }
 
-
-        return 1
-    }
-
-    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" mkinitcpio -P || {
-        return 1
-    }
-
-}
-
 # Step 10: Configure groups
 configure_groups() {
     msg "Configuring groups..."
 
     # Check if groups.sh exists
-    if [[ ! -f "$SCRIPT_DIR/groups.sh" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/05_groups.sh" ]]; then
         err "groups.sh not found at $SCRIPT_DIR/groups.sh"
         return 1
     fi
 
     # Run groups configuration
-    "$SCRIPT_DIR/groups.sh" -m "$MOUNT_ROOT" || {
+    "$SCRIPT_DIR/05_groups.sh" -m "$MOUNT_ROOT" || {
         err "Group configuration failed"
         return 1
     }
@@ -992,13 +995,13 @@ configure_users() {
     msg "Configuring users..."
 
     # Check if users.sh exists
-    if [[ ! -f "$SCRIPT_DIR/users.sh" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/06_users.sh" ]]; then
         err "users.sh not found at $SCRIPT_DIR/users.sh"
         return 1
     fi
 
     # Run users configuration
-    "$SCRIPT_DIR/users.sh" -m "$MOUNT_ROOT" || {
+    "$SCRIPT_DIR/06_users.sh" -m "$MOUNT_ROOT" || {
         err "User configuration failed"
         return 1
     }
@@ -1011,13 +1014,13 @@ perform_sanity_check() {
     msg "Performing sanity check..."
 
     # Check if sanity.sh exists
-    if [[ ! -f "$SCRIPT_DIR/sanity.sh" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/07_sanity.sh" ]]; then
         err "sanity.sh not found at $SCRIPT_DIR/sanity.sh"
         return 1
     fi
 
     # Run sanity check
-    "$SCRIPT_DIR/sanity.sh" "$MOUNT_ROOT" || {
+    "$SCRIPT_DIR/07_sanity.sh" "$MOUNT_ROOT" || {
         err "Sanity check failed - system may not boot properly"
         return 1
     }
@@ -1050,19 +1053,19 @@ if [[ "$ANY_STEP_FLAG" == true ]]; then
     # Run individual steps in correct order (always run in logical sequence)
     [[ "$STEP_PARTITION" == true ]] && {
         msg "Step 1: Partitioning device..."
-        "$SCRIPT_DIR/partition.sh" || exit 1
+        "$SCRIPT_DIR/01_partition.sh" || exit 1
         msg "✓ Partitioning completed"
         echo
     }
     [[ "$STEP_FORMAT" == true ]] && {
         msg "Step 2: Formatting partitions..."
-        "$SCRIPT_DIR/format.sh" $([[ "$FORCE" == true ]] && echo "--force") || exit 1
+        "$SCRIPT_DIR/02_format.sh" $([[ "$FORCE" == true ]] && echo "--force") || exit 1
         msg "✓ Formatting completed"
         echo
     }
     [[ "$STEP_MOUNT" == true ]] && {
         msg "Step 3: Mounting partitions..."
-        "$SCRIPT_DIR/mount.sh" || exit 1
+        "$SCRIPT_DIR/03_mount.sh" || exit 1
         msg "✓ Partitions mounted at $MOUNT_ROOT"
         echo
     }
@@ -1102,8 +1105,6 @@ if [[ "$ANY_STEP_FLAG" == true ]]; then
         msg "✓ Package installation completed"
         echo
     }
-        echo
-    }
     [[ "$STEP_GROUPS" == true ]] && {
         msg "Step 10: Configuring groups..."
         configure_groups || exit 1
@@ -1128,38 +1129,73 @@ else
     msg "Starting Arch Linux installation..."
 
     # Step 1: Partition the device
-    msg "Step 1: Partitioning device..."
-    "$SCRIPT_DIR/partition.sh" || {
+    step_begin "Step 1: Partitioning device" "partition"
+    "$SCRIPT_DIR/01_partition.sh" || {
         err "Partitioning failed"
         exit 1
     }
-    msg "Partitioning completed"
+    step_complete "Step 1: Partitioning device"
 
     # Step 2: Format partitions
-    msg "Step 2: Formatting partitions..."
-    "$SCRIPT_DIR/format.sh" $([[ "$FORCE" == true ]] && echo "--force") || {
+    step_begin "Step 2: Formatting partitions" "format"
+    "$SCRIPT_DIR/02_format.sh" $([[ "$FORCE" == true ]] && echo "--force") || {
         err "Formatting failed"
         exit 1
     }
-    msg "Formatting completed"
+    step_complete "Step 2: Formatting partitions"
 
     # Step 3: Mount partitions
-    msg "Step 3: Mounting partitions..."
-    "$SCRIPT_DIR/mount.sh" || {
+    step_begin "Step 3: Mounting partitions" "mount"
+    "$SCRIPT_DIR/03_mount.sh" || {
         err "Mounting failed"
         exit 1
     }
-    msg "Partitions mounted at $MOUNT_ROOT"
+    step_complete "Step 3: Mounting partitions"
 
+    # Step 4: Install base system
+    step_begin "Step 4: Installing base system" "base-system"
     install_base_system || exit 1
+    step_complete "Step 4: Installing base system"
+
+    # Step 5: Configure system
+    step_begin "Step 5: Configuring system" "configure"
     configure_system || exit 1
+    step_complete "Step 5: Configuring system"
+
+    # Step 6: Setup bootloader
+    step_begin "Step 6: Setting up bootloader" "bootloader"
     setup_bootloader || exit 1
+    step_complete "Step 6: Setting up bootloader"
+
+    # Step 7: Generate initramfs
+    step_begin "Step 7: Generating initramfs" "initramfs"
     generate_initramfs || exit 1
+    step_complete "Step 7: Generating initramfs"
+
+    # Step 8: Configure pacman and repositories
+    step_begin "Step 8: Configuring pacman and repositories" "configure-pacman"
     setup_pacman_and_repos || exit 1
+    step_complete "Step 8: Configuring pacman and repositories"
+
+    # Step 9: Install packages
+    step_begin "Step 9: Installing packages" "packages"
     install_packages || exit 1
+    step_complete "Step 9: Installing packages"
+
+    # Step 10: Configure groups
+    step_begin "Step 10: Configuring groups" "groups"
     configure_groups || exit 1
+    step_complete "Step 10: Configuring groups"
+
+    # Step 11: Configure users
+    step_begin "Step 11: Configuring users" "users"
     configure_users || exit 1
+    step_complete "Step 11: Configuring users"
+
+    # Step 12: Sanity check
+    step_begin "Step 12: Performing sanity check" "sanity"
     perform_sanity_check || exit 1
+    step_complete "Step 12: Performing sanity check"
 fi
 
 # Final cleanup of any remaining bind mounts

@@ -4,7 +4,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib.sh"
 
-DEVICE="/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_2TB_S7L9NJ0Y438532K"
+DEVICE="/dev/disk/by-id/nvme-KINGSTON_OM3PGP4128P-AH_0026B7382A48ED90"
 
 # Get the real device path
 REAL_DEVICE=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
@@ -31,11 +31,18 @@ run_cmd_no_subshell sleep 2
 # Clear existing partition table and create new GPT
 run_cmd_no_subshell sgdisk --zap-all "$DEVICE" || exit 1
 
+# Also wipe filesystem signatures and partition table backup
+run_cmd_no_subshell wipefs --all "$DEVICE" || exit 1
+
+# Ensure kernel sees the changes
+run_cmd_no_subshell partprobe "$DEVICE" || exit 1
+run_cmd_no_subshell sleep 2
+
 # Create partitions
 run_cmd_no_subshell sgdisk -n 1:0:+1500M -t 1:ef00 -c 1:"EFI System" "$DEVICE" || exit 1
-run_cmd_no_subshell sgdisk -n 2:0:+40G -t 2:8200 -c 2:"SWAP" "$DEVICE" || exit 1
-run_cmd_no_subshell sgdisk -n 3:0:+50G -t 3:8300 -c 3:"Root" "$DEVICE" || exit 1
-run_cmd_no_subshell sgdisk -n 4:0:+500G -t 4:8300 -c 4:"Var" "$DEVICE" || exit 1
+run_cmd_no_subshell sgdisk -n 2:0:+16G -t 2:8200 -c 2:"SWAP" "$DEVICE" || exit 1
+run_cmd_no_subshell sgdisk -n 3:0:+20G -t 3:8300 -c 3:"Root" "$DEVICE" || exit 1
+run_cmd_no_subshell sgdisk -n 4:0:+16G -t 4:8300 -c 4:"Var" "$DEVICE" || exit 1
 run_cmd_no_subshell sgdisk -n 5:0:0 -t 5:8300 -c 5:"Home" "$DEVICE" || exit 1
 
 # Print final partition table

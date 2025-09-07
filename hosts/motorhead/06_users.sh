@@ -77,6 +77,16 @@ if arch-chroot "$MOUNT_ROOT" id "$USERNAME" > /dev/null 2>&1; then
     }
 else
     msg "Creating user $USERNAME..."
+    
+    # First ensure the primary group exists
+    msg "Checking if group with GID $HOST_GID exists..."
+    if ! arch-chroot "$MOUNT_ROOT" getent group "$HOST_GID" > /dev/null 2>&1; then
+        msg "Creating group with GID $HOST_GID for user $USERNAME..."
+        run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" groupadd -g "$HOST_GID" "$USERNAME" || {
+            warn "Failed to create primary group, will use default group creation"
+        }
+    fi
+    
     # Create user with same UID, GID, shell, and GECOS
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" useradd -u "$HOST_UID" -g "$HOST_GID" -m -s "$HOST_SHELL" -c "$HOST_GECOS" "$USERNAME" || {
         # If user creation fails (maybe due to UID conflict), create with default settings
@@ -118,6 +128,45 @@ run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" passwd "$USERNAME"
 # Set ownership of home directory
 # Use numeric UID:GID since group name might not match username
 run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chown -R "$HOST_UID:$HOST_GID" "/home/$USERNAME"
+
+# Setup neovim configuration for both root and jesusa
+msg "Setting up neovim configuration..."
+
+# Setup for root user
+msg "Configuring neovim for root user..."
+run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" mkdir -p /root/.config/nvim || {
+    warn "Failed to create /root/.config/nvim directory"
+}
+
+# Copy nvim.lua as init.lua for root
+if [[ -f "$SCRIPT_DIR/../../nvim.lua" ]]; then
+    cp "$SCRIPT_DIR/../../nvim.lua" "$MOUNT_ROOT/root/.config/nvim/init.lua" || {
+        warn "Failed to copy nvim configuration for root"
+    }
+    msg "Neovim configuration copied for root user"
+else
+    warn "nvim.lua not found at $SCRIPT_DIR/../../nvim.lua"
+fi
+
+# Setup for jesusa user
+msg "Configuring neovim for $USERNAME user..."
+run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" mkdir -p "/home/$USERNAME/.config/nvim" || {
+    warn "Failed to create /home/$USERNAME/.config/nvim directory"
+}
+
+# Copy nvim.lua as init.lua for jesusa
+if [[ -f "$SCRIPT_DIR/../../nvim.lua" ]]; then
+    cp "$SCRIPT_DIR/../../nvim.lua" "$MOUNT_ROOT/home/$USERNAME/.config/nvim/init.lua" || {
+        warn "Failed to copy nvim configuration for $USERNAME"
+    }
+    # Set proper ownership for jesusa's config
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chown -R "$HOST_UID:$HOST_GID" "/home/$USERNAME/.config" || {
+        warn "Failed to set ownership of neovim config for $USERNAME"
+    }
+    msg "Neovim configuration copied for $USERNAME user"
+else
+    warn "nvim.lua not found at $SCRIPT_DIR/../../nvim.lua"
+fi
 
 msg "User $USERNAME configured successfully"
 

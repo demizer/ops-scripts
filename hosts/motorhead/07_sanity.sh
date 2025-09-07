@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/../../lib.sh"
 
 # Pre-populated configuration
 MOUNT_ROOT="${1:-/mnt/root}"
-DEVICE_ROOT="/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_2TB_S7L9NJ0Y438532K"
+DEVICE_ROOT="/dev/disk/by-id/nvme-KINGSTON_OM3PGP4128P-AH_0026B7382A48ED90"
 
 show_help() {
     cat << EOF
