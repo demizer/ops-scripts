@@ -105,11 +105,12 @@ The USB tools system created by `create-usb-tools.sh` includes:
 
 ### Boot Features
 
-- Auto-login as root with fish shell
-- Tmux session management
+- Auto-login as root with fish shell (no automatic tmux)
+- Optional tmux session via `setup-session` command
 - Custom MOTD with ASCII art branding
 - Memory testing (memtest86+)
 - Emergency boot options
+- Session tools with pre-configured windows (ops-scripts, monitoring, network)
 
 ## Usage
 
@@ -126,7 +127,31 @@ sudo ./usb-tools/create-usb-tools.sh --device /dev/sdb --bridge-password "mypass
 
 # Force creation without confirmation
 sudo ./usb-tools/create-usb-tools.sh --device /dev/sdb --force
+
+# Update configuration only (no partitioning/formatting)
+sudo ./usb-tools/create-usb-tools.sh --device /dev/sdb --config-update
 ```
+
+### Configuration Updates
+
+The `--config-update` option allows updating existing USB tools systems without recreating them:
+
+**What gets updated:**
+- Shell configuration (fish shell setup)
+- User configurations (neovim, fish config files)
+- MOTD and branding
+- Session tools (setup-session script)
+- Environment variables
+- ops-scripts repository in /workspace/
+
+**What is preserved:**
+- Partitioning and formatting
+- Base system installation
+- System services configuration
+- SSH configuration
+- Bootloader configuration
+
+This is useful for applying script updates, configuration changes, or adding new ops-scripts without the time and risk of full system recreation.
 
 ### Security Notes
 
