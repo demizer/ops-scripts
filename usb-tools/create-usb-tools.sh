@@ -73,7 +73,7 @@ PACKAGES=(
     base linux linux-firmware
 
     # Essential tools
-    bash-completion fish tmux
+    bash bash-completion fish tmux git
     openssh sudo
 
     # System tools
@@ -102,6 +102,7 @@ PACKAGES=(
     openbsd-netcat # Network connectivity testing
     socat          # Socket relay and tunneling
     iperf3 iperf   # Network performance testing
+    iwd            # Wireless networking
 
     # File system tools
     e2fsprogs dosfstools ntfs-3g
@@ -171,11 +172,13 @@ OPTIONS:
     -h, --help          Show this help message
     -f, --force         Skip confirmation prompts
     --bridge-password   Proton Mail Bridge password for email setup
+    --config-update     Update configuration only (no partitioning/formatting)
 
 EXAMPLES:
     $0 --device /dev/sdb
     $0 --device /dev/mmcblk0 --force
     $0 --device /dev/sdb --bridge-password "mypassword"
+    $0 --device /dev/sdb --config-update
 
 EOF
 }
@@ -183,6 +186,7 @@ EOF
 # Parse command line arguments
 FORCE=false
 BRIDGE_PASSWORD=""
+CONFIG_UPDATE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -201,6 +205,10 @@ while [[ $# -gt 0 ]]; do
         --bridge-password)
             BRIDGE_PASSWORD="$2"
             shift 2
+            ;;
+        --config-update)
+            CONFIG_UPDATE=true
+            shift
             ;;
         *)
             error "Unknown option: $1"
@@ -227,7 +235,45 @@ if [[ ! -b "$DEVICE" ]]; then
     exit 1
 fi
 
-msg "Creating USB Tools System on $DEVICE"
+# Set appropriate message based on mode
+if [[ "$CONFIG_UPDATE" == true ]]; then
+    msg "Updating USB Tools System configuration on $DEVICE"
+else
+    msg "Creating USB Tools System on $DEVICE"
+fi
+
+# Check if device is mounted and unmount if necessary
+msg2 "Checking device mount status..."
+
+# Determine partition paths for checking
+if [[ "$DEVICE" =~ mmcblk|nvme ]]; then
+    DEVICE_PARTITIONS=("${DEVICE}p1" "${DEVICE}p2" "${DEVICE}p3")
+else
+    DEVICE_PARTITIONS=("${DEVICE}1" "${DEVICE}2" "${DEVICE}3")
+fi
+
+# Check and unmount any partitions from the target device
+UNMOUNTED_PARTITIONS=()
+for part in "${DEVICE_PARTITIONS[@]}" "$DEVICE"; do
+    if [[ -e "$part" ]] && mountpoint -q "$part" 2> /dev/null; then
+        msg2 "Unmounting $part"
+        if umount "$part" 2> /dev/null; then
+            UNMOUNTED_PARTITIONS+=("$part")
+        else
+            warning "Failed to unmount $part - attempting force unmount"
+            if umount -f "$part" 2> /dev/null; then
+                UNMOUNTED_PARTITIONS+=("$part")
+            else
+                error "Cannot unmount $part - device may be in use"
+                exit 1
+            fi
+        fi
+    fi
+done
+
+if [[ ${#UNMOUNTED_PARTITIONS[@]} -gt 0 ]]; then
+    msg2 "Unmounted partitions: ${UNMOUNTED_PARTITIONS[*]}"
+fi
 
 # Show device information
 msg2 "Target device info:"
@@ -237,7 +283,7 @@ lsblk "$DEVICE" 2> /dev/null | sed 's/^/    /' || {
 }
 
 # Confirmation unless --force
-if [[ "$FORCE" != true ]]; then
+if [[ "$FORCE" != true && "$CONFIG_UPDATE" != true ]]; then
     echo
     warning "This will completely destroy all data on $DEVICE!"
     read -p "Are you sure you want to continue? (y/N): " -r
@@ -247,10 +293,19 @@ if [[ "$FORCE" != true ]]; then
     fi
 fi
 
-msg "Starting USB tools system creation..."
+if [[ "$CONFIG_UPDATE" == true ]]; then
+    msg "Starting USB tools system configuration update..."
+else
+    msg "Starting USB tools system creation..."
+fi
 
 # Function to cleanup on exit
 cleanup() {
+    # Skip cleanup if config update already handled it
+    if [[ "$CONFIG_UPDATE" == true && "$CONFIG_CLEANUP_DONE" == true ]]; then
+        return 0
+    fi
+
     if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
         msg2 "Cleaning up: unmounting $MOUNT_ROOT"
         umount -R "$MOUNT_ROOT" 2> /dev/null
@@ -258,6 +313,37 @@ cleanup() {
     if mountpoint -q "$MOUNT_EFI" 2> /dev/null; then
         msg2 "Cleaning up: unmounting $MOUNT_EFI"
         umount "$MOUNT_EFI" 2> /dev/null
+    fi
+}
+
+# Function to cleanup config update mode
+cleanup_config_update() {
+    if [[ "$CONFIG_UPDATE" == true ]]; then
+        msg2 "Config update complete - unmounting device"
+        local unmount_failed=false
+
+        if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
+            if ! umount -R "$MOUNT_ROOT" 2> /dev/null; then
+                warning "Failed to unmount $MOUNT_ROOT"
+                unmount_failed=true
+            fi
+        fi
+
+        if mountpoint -q "$MOUNT_EFI" 2> /dev/null; then
+            if ! umount "$MOUNT_EFI" 2> /dev/null; then
+                warning "Failed to unmount $MOUNT_EFI"
+                unmount_failed=true
+            fi
+        fi
+
+        if [[ "$unmount_failed" == true ]]; then
+            warning "Some partitions could not be unmounted - check 'lsof $DEVICE*' or 'fuser -v $DEVICE*'"
+        else
+            msg2 "Device unmounted - safe to remove"
+        fi
+
+        # Mark that config cleanup is done to avoid duplicate cleanup
+        CONFIG_CLEANUP_DONE=true
     fi
 }
 
@@ -442,27 +528,67 @@ install_base_system() {
     msg2 "Base system installed successfully"
 }
 
-# Execute the steps
-partition_device || exit 1
-format_partitions || exit 1
-mount_partitions || exit 1
-install_base_system || exit 1
+# Mount existing partitions for config update
+mount_existing_partitions() {
+    msg2 "Mounting existing partitions for configuration update..."
 
-# Step 5: Configure the system
-configure_system() {
-    msg2 "Configuring system..."
+    # Determine partition paths
+    if [[ "$DEVICE" =~ mmcblk|nvme ]]; then
+        EFI_PART="${DEVICE}p1"
+        SWAP_PART="${DEVICE}p2"
+        ROOT_PART="${DEVICE}p3"
+    else
+        EFI_PART="${DEVICE}1"
+        SWAP_PART="${DEVICE}2"
+        ROOT_PART="${DEVICE}3"
+    fi
+
+    # Check if partitions exist
+    if [[ ! -e "$ROOT_PART" ]]; then
+        error "Root partition $ROOT_PART not found - device may not be a USB tools system"
+        return 1
+    fi
+
+    # Create mount points
+    mkdir -p "$MOUNT_ROOT" "$MOUNT_EFI"
+
+    # Mount root partition
+    mount "$ROOT_PART" "$MOUNT_ROOT" || {
+        error "Failed to mount root partition"
+        return 1
+    }
+
+    # Mount EFI partition if it exists
+    if [[ -e "$EFI_PART" ]] && [[ -d "$MOUNT_ROOT/boot" ]]; then
+        mount "$EFI_PART" "$MOUNT_ROOT/boot" || {
+            warning "Failed to mount EFI partition - continuing without it"
+        }
+    fi
+
+    msg2 "Existing partitions mounted successfully"
+}
+
+# Execute the steps based on mode
+if [[ "$CONFIG_UPDATE" == true ]]; then
+    # Config update mode - just mount existing partitions
+    mount_existing_partitions || exit 1
+else
+    # Full creation mode - partition, format, mount, install
+    partition_device || exit 1
+    format_partitions || exit 1
+    mount_partitions || exit 1
+    install_base_system || exit 1
+fi
+
+# Step 5a: Configure base system
+configure_base_system() {
+    msg2 "Configuring base system..."
 
     # Generate fstab
     genfstab -U "$MOUNT_ROOT" >> "$MOUNT_ROOT/etc/fstab" || {
         error "Failed to generate fstab"
         return 1
     }
-
-    # Ensure no conflicting swap entries exist
-    msg2 "Cleaning up fstab for proper swap configuration..."
-    # Remove any swapfile entries that might interfere
-    sed -i '/\/home\/swapfile/d' "$MOUNT_ROOT/etc/fstab"
-    sed -i '/\/swapfile/d' "$MOUNT_ROOT/etc/fstab"
 
     # Set hostname
     echo "alvaone-tools" > "$MOUNT_ROOT/etc/hostname"
@@ -480,13 +606,19 @@ configure_system() {
     # Set root password to 'alvaone'
     echo 'root:alvaone' | arch-chroot "$MOUNT_ROOT" chpasswd
 
+    msg2 "Base system configured successfully"
+}
+
+# Step 5b: Configure systemd services and networking
+configure_systemd() {
+    msg2 "Configuring systemd services and networking..."
+
     # Enable essential services
     arch-chroot "$MOUNT_ROOT" systemctl enable sshd
     arch-chroot "$MOUNT_ROOT" systemctl enable systemd-networkd
     arch-chroot "$MOUNT_ROOT" systemctl enable systemd-resolved
 
     # Configure automatic wired network connection
-    msg2 "Configuring automatic wired network connection..."
     mkdir -p "$MOUNT_ROOT/etc/systemd/network"
     cat > "$MOUNT_ROOT/etc/systemd/network/20-wired.network" << 'EOF'
 [Match]
@@ -500,6 +632,18 @@ IPv6AcceptRA=yes
 RouteMetric=10
 EOF
 
+    msg2 "Systemd services and networking configured successfully"
+}
+
+# Step 5c: Configure swap settings
+configure_swap() {
+    msg2 "Configuring swap settings..."
+
+    # Ensure no conflicting swap entries exist
+    # Remove any swapfile entries that might interfere
+    sed -i '/\/home\/swapfile/d' "$MOUNT_ROOT/etc/fstab"
+    sed -i '/\/swapfile/d' "$MOUNT_ROOT/etc/fstab"
+
     # Disable any automatic swapfile creation services
     arch-chroot "$MOUNT_ROOT" systemctl mask systemd-swap || true
 
@@ -507,8 +651,14 @@ EOF
     rm -f "$MOUNT_ROOT/etc/systemd/swap.conf" 2> /dev/null || true
     rm -f "$MOUNT_ROOT/etc/systemd/swap.conf.d/"* 2> /dev/null || true
 
+    msg2 "Swap configuration completed successfully"
+}
+
+# Step 5d: Configure SSH and workspace directories
+configure_ssh() {
+    msg2 "Configuring SSH server and workspace directories..."
+
     # Configure SSH for better rsync/scp support
-    msg2 "Configuring SSH server..."
     mkdir -p "$MOUNT_ROOT/etc/ssh/sshd_config.d"
     cat > "$MOUNT_ROOT/etc/ssh/sshd_config.d/99-usb-tools.conf" << 'EOF'
 # USB Tools SSH Configuration
@@ -570,18 +720,12 @@ Example rsync usage:
   rsync -av root@<usb-ip>:/workspace/ /local/backup/
 EOF
 
-    msg2 "System configured successfully"
+    msg2 "SSH and workspace directories configured successfully"
 }
 
-# Step 6: Install and configure systemd-boot
-setup_bootloader() {
-    msg2 "Setting up systemd-boot bootloader..."
-
-    # Install systemd-boot
-    arch-chroot "$MOUNT_ROOT" bootctl install || {
-        error "Failed to install systemd-boot"
-        return 1
-    }
+# Step 5e: Configure memtest
+configure_memtest() {
+    msg2 "Setting up memtest86+ binary..."
 
     # Copy memtest86+ EFI binary - try multiple possible locations
     MEMTEST_INSTALLED=false
@@ -619,6 +763,19 @@ setup_bootloader() {
     if [[ "$MEMTEST_INSTALLED" == false ]]; then
         msg2 "Memtest86+ EFI binary not found - memtest boot entry will be skipped"
     fi
+
+    msg2 "Memtest86+ setup completed"
+}
+
+# Step 6: Install and configure systemd-boot
+setup_bootloader() {
+    msg2 "Setting up systemd-boot bootloader..."
+
+    # Install systemd-boot
+    arch-chroot "$MOUNT_ROOT" bootctl install || {
+        error "Failed to install systemd-boot"
+        return 1
+    }
 
     # Create loader configuration
     cat > "$MOUNT_ROOT/boot/loader/loader.conf" << 'EOF'
@@ -708,9 +865,9 @@ EOF
     msg2 "Initramfs generated successfully"
 }
 
-# Step 8: Apply archiso-style customizations
-apply_customizations() {
-    msg2 "Applying archiso-style customizations..."
+# Step 8a: Setup login and shell
+setup_login_shell() {
+    msg2 "Setting up login and shell configuration..."
 
     # Set up auto-login for root on tty1
     mkdir -p "$MOUNT_ROOT/etc/systemd/system/getty@tty1.service.d"
@@ -720,22 +877,28 @@ ExecStart=
 ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin root %I $TERM
 EOF
 
-    # Set bash as default shell for root (rsync compatibility)
-    arch-chroot "$MOUNT_ROOT" chsh -s /bin/bash root
+    # Set fish as default shell for root
+    arch-chroot "$MOUNT_ROOT" chsh -s /usr/bin/fish root
+
+    msg2 "Login and shell configuration completed successfully"
+}
+
+# Step 8b: Setup user configurations
+setup_user_configs() {
+    msg2 "Setting up user configurations..."
 
     # Create fish configuration directory
     mkdir -p "$MOUNT_ROOT/root/.config/fish"
 
     # Set up neovim configuration
-    msg2 "Setting up neovim configuration..."
     mkdir -p "$MOUNT_ROOT/root/.config/nvim"
 
-    # Copy the nvim.lua configuration as init.lua
-    if [[ -f "$HOME/.config/nvim/nvim.lua" ]]; then
-        cp "$HOME/.config/nvim/nvim.lua" "$MOUNT_ROOT/root/.config/nvim/init.lua"
+    # Copy the nvim.lua configuration as init.lua from parent directory
+    if [[ -f "$SCRIPT_DIR/../nvim.lua" ]]; then
+        cp "$SCRIPT_DIR/../nvim.lua" "$MOUNT_ROOT/root/.config/nvim/init.lua"
         msg2 "Neovim configuration installed"
     else
-        msg2 "Warning: nvim.lua not found at $HOME/.config/nvim/nvim.lua - skipping neovim config"
+        msg2 "Warning: nvim.lua not found at $SCRIPT_DIR/../nvim.lua - skipping neovim config"
     fi
 
     # Create fish configuration with archiso-style setup
@@ -760,22 +923,6 @@ if test -d /etc/environment.d
     end
 end
 
-# Start tmux session if not already in one and in an interactive terminal
-if command -v tmux >/dev/null 2>&1; and not set -q TMUX; and status is-interactive; and isatty stdin; and isatty stdout
-    set SESSION_NAME "main"
-    # Create session if it doesn't exist
-    if not tmux has-session -t "$SESSION_NAME" 2>/dev/null
-        # Create session in workspace directory
-        tmux new-session -d -s "$SESSION_NAME" -c /workspace
-        # Set up multiple windows
-        tmux rename-window -t "$SESSION_NAME:0" "ops-scripts"
-        tmux new-window -t "$SESSION_NAME" -n "monitoring" -c /
-        tmux new-window -t "$SESSION_NAME" -n "network" -c /
-        # Return to first window
-        tmux select-window -t "$SESSION_NAME:0"
-    end
-    exec tmux attach-session -t "$SESSION_NAME"
-end
 
 # Add helpful aliases
 alias ll='ls -la'
@@ -803,8 +950,16 @@ echo "  - Network diagnostics: nmap, iperf3, mtr, tcpdump, traceroute"
 echo "  - Disk recovery: ddrescue, testdisk, photorec, foremost"
 echo "  - System monitoring: htop, iotop, lsof, strace"
 echo "  - File management: mc, tree, ncdu"
+echo "  - Run 'setup-session' to start tmux with multiple windows"
 echo
 EOF
+
+    msg2 "User configurations setup completed successfully"
+}
+
+# Step 8c: Setup MOTD and branding
+setup_motd_branding() {
+    msg2 "Setting up MOTD and branding..."
 
     # Create MOTD script
     cat > "$MOUNT_ROOT/root/motd.sh" << 'EOF'
@@ -828,12 +983,62 @@ echo "Network: SSH daemon is enabled and running"
 echo "Username: root"
 echo "Password: alvaone"
 echo
-echo "Shell: Default is bash (rsync compatible)"
-echo "       Type 'fish' to start fish shell with tmux"
+echo "Shell: Default is fish"
+echo "       Run 'setup-session' to start tmux with multiple windows"
 echo
 EOF
 
     chmod +x "$MOUNT_ROOT/root/motd.sh"
+
+    msg2 "MOTD and branding setup completed successfully"
+}
+
+# Step 8d: Setup session tools
+setup_session_tools() {
+    msg2 "Setting up session tools..."
+
+    # Create setup-session.fish script
+    cat > "$MOUNT_ROOT/usr/local/bin/setup-session.fish" << 'EOF'
+#!/usr/bin/env fish
+
+# Setup tmux session with multiple windows
+if command -v tmux >/dev/null 2>&1
+    set SESSION_NAME "main"
+
+    # Create session if it doesn't exist
+    if not tmux has-session -t "$SESSION_NAME" 2>/dev/null
+        # Create session in workspace directory
+        tmux new-session -d -s "$SESSION_NAME" -c /workspace
+        # Set up multiple windows
+        tmux rename-window -t "$SESSION_NAME:0" "ops-scripts"
+        tmux new-window -t "$SESSION_NAME" -n "monitoring" -c /
+        tmux new-window -t "$SESSION_NAME" -n "network" -c /
+        # Return to first window
+        tmux select-window -t "$SESSION_NAME:0"
+        echo "Created new tmux session '$SESSION_NAME'"
+    else
+        echo "Tmux session '$SESSION_NAME' already exists"
+    end
+
+    # Attach to session
+    tmux attach-session -t "$SESSION_NAME"
+else
+    echo "Error: tmux not found"
+    exit 1
+end
+EOF
+
+    chmod +x "$MOUNT_ROOT/usr/local/bin/setup-session.fish"
+
+    # Create setup-session command symlink
+    ln -sf /usr/local/bin/setup-session.fish "$MOUNT_ROOT/usr/local/bin/setup-session"
+
+    msg2 "Session tools setup completed successfully"
+}
+
+# Step 8e: Setup environment
+setup_environment() {
+    msg2 "Setting up environment configuration..."
 
     # Create environment file with bridge password if provided
     if [[ -n "$BRIDGE_PASSWORD" ]]; then
@@ -845,7 +1050,7 @@ EOF
         msg2 "Bridge password configured"
     fi
 
-    msg2 "Archiso-style customizations applied"
+    msg2 "Environment configuration completed successfully"
 }
 
 # Step 9: Copy ops-scripts to workspace
@@ -863,24 +1068,67 @@ copy_ops_scripts() {
     # Create workspace directory
     mkdir -p "$MOUNT_ROOT/workspace"
 
-    # Change to ops-scripts directory and copy git-tracked files
-    cd "$ops_scripts_dir"
+    # Check for dirty git status in mounted workspace if config update mode
+    if [[ "$CONFIG_UPDATE" == true && -d "$MOUNT_ROOT/workspace/.git" ]]; then
+        msg2 "Checking git status in mounted workspace..."
 
-    local copied_count=0
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" ]]; then
-            local dest_file="$MOUNT_ROOT/workspace/$file"
-            local dest_dir=$(dirname "$dest_file")
-            mkdir -p "$dest_dir"
-            cp "$file" "$dest_file"
-            ((copied_count++))
+        # Check git status in mounted workspace without changing directory
+        # Check if there are any changes (staged, unstaged, or untracked files)
+        if ! git -C "$MOUNT_ROOT/workspace" diff-index --quiet HEAD 2> /dev/null || ! git -C "$MOUNT_ROOT/workspace" diff-index --quiet --cached HEAD 2> /dev/null || [[ -n $(git -C "$MOUNT_ROOT/workspace" ls-files --others --exclude-standard) ]]; then
+            warning "Found changes in mounted workspace git repository:"
+            echo
+
+            # Show status with color if supported
+            if git -C "$MOUNT_ROOT/workspace" status --porcelain | grep -q .; then
+                echo "Changed files:"
+                git -C "$MOUNT_ROOT/workspace" status --porcelain | sed 's/^/  /'
+                echo
+
+                if [[ "$FORCE" != true ]]; then
+                    read -p "Overwrite workspace with local ops-scripts? This will delete the above changes (y/N): " -r
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        msg2 "Skipping ops-scripts sync - keeping existing workspace"
+                        return 0
+                    fi
+                fi
+
+                msg2 "Syncing local ops-scripts to workspace with --delete-after"
+
+                # Use rsync with --delete-after to sync and remove files not in source
+                if ! rsync -av --delete-after "$ops_scripts_dir/" "$MOUNT_ROOT/workspace/"; then
+                    error "Failed to sync ops-scripts with rsync"
+                    return 1
+                fi
+
+                # Force kernel to flush changes to disk
+                msg2 "Flushing filesystem changes to disk..."
+                sync
+                msg2 "Filesystem sync completed"
+
+                msg2 "Workspace synced with local ops-scripts"
+            fi
+        else
+            msg2 "No changes found in mounted workspace - updating normally"
+            # Fall through to normal copy process
         fi
-    done < <(git ls-files -z 2> /dev/null)
+    fi
 
-    # Copy .git directory
-    if [[ -d "$ops_scripts_dir/.git" ]]; then
-        cp -r "$ops_scripts_dir/.git" "$MOUNT_ROOT/workspace/"
-        msg2 "Copied .git directory"
+    # Normal copy process (for non-config-update mode or clean workspace)
+    if [[ "$CONFIG_UPDATE" != true ]] || [[ ! -d "$MOUNT_ROOT/workspace/.git" ]] || git -C "$MOUNT_ROOT/workspace" diff-index --quiet HEAD 2> /dev/null; then
+        msg2 "Syncing ops-scripts to workspace using rsync"
+
+        # Use rsync to sync ops-scripts directory
+        if ! rsync -av "$ops_scripts_dir/" "$MOUNT_ROOT/workspace/"; then
+            error "Failed to sync ops-scripts with rsync"
+            return 1
+        fi
+
+        # Force kernel to flush changes to disk
+        msg2 "Flushing filesystem changes to disk..."
+        sync
+        msg2 "Filesystem sync completed"
+
+        msg2 "ops-scripts synced to workspace directory"
     fi
 
     # Make shell scripts executable
@@ -908,16 +1156,34 @@ copy_ops_scripts() {
             msg2 "Created symlink: $link_name -> $full_source"
         fi
     done
-
-    msg2 "Copied $copied_count files to workspace directory"
 }
 
-# Execute all configuration steps
-configure_system || exit 1
-setup_bootloader || exit 1
-generate_initramfs || exit 1
-apply_customizations || exit 1
-copy_ops_scripts || exit 1
+# Execute configuration steps based on mode
+if [[ "$CONFIG_UPDATE" == true ]]; then
+    # Config update mode - only update configurable items
+    msg "Updating configuration components..."
+    setup_login_shell || exit 1
+    setup_user_configs || exit 1
+    setup_motd_branding || exit 1
+    setup_session_tools || exit 1
+    setup_environment || exit 1
+    copy_ops_scripts || exit 1
+else
+    # Full creation mode - all configuration steps
+    configure_base_system || exit 1
+    configure_systemd || exit 1
+    configure_swap || exit 1
+    configure_ssh || exit 1
+    configure_memtest || exit 1
+    setup_bootloader || exit 1
+    generate_initramfs || exit 1
+    setup_login_shell || exit 1
+    setup_user_configs || exit 1
+    setup_motd_branding || exit 1
+    setup_session_tools || exit 1
+    setup_environment || exit 1
+    copy_ops_scripts || exit 1
+fi
 
 # Final sync to ensure all data is written to disk
 msg2 "Performing final sync to ensure all data is written to disk..."
@@ -933,13 +1199,27 @@ fi
 sync
 msg2 "All data synced to disk"
 
-msg "USB Tools System created successfully!"
-msg2 "System features:"
-msg2 "  - Auto-login as root with fish shell"
-msg2 "  - Archiso-style MOTD and branding"
-msg2 "  - SSH enabled on boot (password: alvaone)"
-msg2 "  - Comprehensive system administration tools"
-msg2 "  - Memory testing and emergency boot options"
-msg2 "  - ops-scripts available in /workspace/"
+# Cleanup for config update mode
+cleanup_config_update
+
+if [[ "$CONFIG_UPDATE" == true ]]; then
+    msg "USB Tools System configuration updated successfully!"
+    msg2 "Updated components:"
+    msg2 "  - Shell configuration (fish)"
+    msg2 "  - User configs (neovim, fish)"
+    msg2 "  - MOTD and branding"
+    msg2 "  - Session tools (setup-session)"
+    msg2 "  - Environment variables"
+    msg2 "  - ops-scripts in /workspace/"
+else
+    msg "USB Tools System created successfully!"
+    msg2 "System features:"
+    msg2 "  - Auto-login as root with fish shell"
+    msg2 "  - Archiso-style MOTD and branding"
+    msg2 "  - SSH enabled on boot (password: alvaone)"
+    msg2 "  - Comprehensive system administration tools"
+    msg2 "  - Memory testing and emergency boot options"
+    msg2 "  - ops-scripts available in /workspace/"
+fi
 echo
 msg2 "To test in QEMU: sudo $SCRIPT_DIR/test-usb-tools-qemu.sh --no-host-networking --device $DEVICE"
