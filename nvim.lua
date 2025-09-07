@@ -122,7 +122,7 @@ local function create_lazygit_config()
     local config_path
     local config_file
 
-    config_path = vim.fn.expand('.nvim/config/lazygit')
+    config_path = vim.fn.expand('~/.config/nvim/lazygit')
     config_file = config_path .. '/config.yml'
 
     if vim.fn.isdirectory(config_path) == 0 then
