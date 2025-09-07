@@ -603,6 +603,9 @@ configure_base_system() {
     # Generate locale
     arch-chroot "$MOUNT_ROOT" locale-gen
 
+    # Configure dvorak keymap
+    echo "KEYMAP=dvorak" > "$MOUNT_ROOT/etc/vconsole.conf"
+
     # Set root password to 'alvaone'
     echo 'root:alvaone' | arch-chroot "$MOUNT_ROOT" chpasswd
 
