@@ -57,10 +57,8 @@ PACKAGES=(
     gimp
     git-lfs
     gnome
-    gnome-browser-connector
     gnome-circle
     gnome-extra
-    gnome-shell-extension-pop-shell-git
     gdm
     go
     grilo-plugins
@@ -135,6 +133,7 @@ PACKAGES=(
     patch
     patchelf
     pkgconf
+    pop-launcher-git
     postgresql
     postman-bin
     powerline-fonts
