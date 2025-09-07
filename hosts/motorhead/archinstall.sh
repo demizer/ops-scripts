@@ -41,6 +41,7 @@ OPTIONS:
     -h, --help              Show this help message
     --help-long             Show detailed descriptions of each step
     -f, --force             Skip confirmation prompts
+    --chroot                Mount partitions and drop into arch-chroot shell
 
 STEP OPTIONS (run individual or multiple steps):
     --partition             Run partitioning step
@@ -202,6 +203,7 @@ EOF
 # Parse command line arguments
 FORCE=false
 STEPS_FROM=""
+CHROOT_MODE=false
 
 # Step flags
 STEP_PARTITION=false
@@ -229,6 +231,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -f | --force)
             FORCE=true
+            shift
+            ;;
+        --chroot)
+            CHROOT_MODE=true
             shift
             ;;
         --partition)
@@ -431,7 +437,7 @@ for flag in "$STEP_PARTITION" "$STEP_FORMAT" "$STEP_MOUNT" "$STEP_BASE_SYSTEM" "
 done
 
 # Only run setup and confirmations for full installation
-if [[ "$ANY_STEP_FLAG" != true ]]; then
+if [[ "$ANY_STEP_FLAG" != true && "$CHROOT_MODE" != true ]]; then
     # Cache password for both root and user (unless --force is used) - ask early
     if [[ "$FORCE" != true ]]; then
         while true; do
@@ -470,8 +476,8 @@ if [[ "$ANY_STEP_FLAG" != true ]]; then
     fi
 fi
 
-# Also cache password for specific step runs that need it
-if [[ "$STEP_CONFIGURE" == true || "$STEP_USERS" == true ]] && [[ -z "$USER_PASSWORD" ]]; then
+# Cache password for specific steps that need it (configure or users steps)
+if [[ "$STEP_CONFIGURE" == true || "$STEP_USERS" == true ]] && [[ -z "$USER_PASSWORD" ]] && [[ "$FORCE" != true ]]; then
     while true; do
         msg "Please enter a password to use for both root and jesusa users:"
         read -s -p "Password: " USER_PASSWORD
@@ -1186,6 +1192,24 @@ perform_sanity_check() {
 
     msg "Sanity check completed successfully"
 }
+
+# Handle --chroot mode
+if [[ "$CHROOT_MODE" == true ]]; then
+    msg "Chroot mode: Mounting partitions and launching arch-chroot shell"
+
+    # Mount partitions
+    msg "Step 3: Mounting partitions..."
+    "$SCRIPT_DIR/03_mount.sh" || {
+        err "Mounting failed"
+        exit 1
+    }
+    msg "✓ Partitions mounted at $MOUNT_ROOT"
+
+    # Launch arch-chroot shell with fish
+    msg "Launching arch-chroot with fish shell at $MOUNT_ROOT"
+    msg "Type 'exit' to return to host system"
+    exec arch-chroot "$MOUNT_ROOT" /usr/bin/fish
+fi
 
 # Execute installation steps
 if [[ "$ANY_STEP_FLAG" == true ]]; then
