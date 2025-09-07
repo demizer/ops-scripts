@@ -664,7 +664,10 @@ configure_ssh() {
 # USB Tools SSH Configuration
 # Optimized for rsync/scp operations
 
-# Allow root login (live environment)
+# Authentication settings
+PubkeyAuthentication yes
+PasswordAuthentication yes
+MaxAuthTries 6
 PermitRootLogin yes
 
 # Performance optimizations for file transfers
@@ -683,10 +686,6 @@ ClientAliveCountMax 3
 ChallengeResponseAuthentication no
 KerberosAuthentication no
 GSSAPIAuthentication no
-
-# Enable password authentication (live environment)
-PasswordAuthentication yes
-PubkeyAuthentication yes
 
 # Optimize for LAN usage
 UseDNS no
@@ -721,6 +720,26 @@ Example rsync usage:
 EOF
 
     msg2 "SSH and workspace directories configured successfully"
+}
+
+# Step 5f: Configure SSH authorized keys
+configure_ssh_keys() {
+    msg2 "Configuring SSH authorized keys..."
+
+    # Look for the specific SSH public key
+    local ssh_pubkey="$HOME/.ssh/id_ed25519_alvaone_2025-09-06.pub"
+    
+    if [[ -f "$ssh_pubkey" ]]; then
+        msg2 "Found SSH public key at $ssh_pubkey"
+        cp "$ssh_pubkey" "$MOUNT_ROOT/root/.ssh/authorized_keys"
+        chmod 600 "$MOUNT_ROOT/root/.ssh/authorized_keys"
+        msg2 "SSH public key installed for passwordless root access"
+    else
+        msg2 "SSH public key not found at $ssh_pubkey - passwordless access not configured"
+        msg2 "Create key with: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_alvaone_2025-09-06"
+    fi
+
+    msg2 "SSH key configuration completed successfully"
 }
 
 # Step 5e: Configure memtest
@@ -903,9 +922,6 @@ setup_user_configs() {
 
     # Create fish configuration with archiso-style setup
     cat > "$MOUNT_ROOT/root/.config/fish/config.fish" << 'EOF'
-# Alvaone System Tools fish configuration
-set -g fish_greeting "Welcome to Alvaone System Tools"
-
 # Load environment variables from systemd environment files
 if test -d /etc/environment.d
     for file in /etc/environment.d/*.conf
@@ -931,27 +947,40 @@ alias l='ls -CF'
 alias ..='cd ..'
 alias ...='cd ../..'
 
-# Show MOTD only once using sentinel file
-set MOTD_SHOWN_FILE "/tmp/.motd_shown"
-if not test -f $MOTD_SHOWN_FILE
-    bash /root/motd.sh
-    touch $MOTD_SHOWN_FILE
+# Show MOTD only for interactive sessions
+if status is-interactive
+    # Show MOTD only once using sentinel file
+    set MOTD_SHOWN_FILE "/tmp/.motd_shown"
+    if not test -f $MOTD_SHOWN_FILE
+        bash /root/motd.sh
+        touch $MOTD_SHOWN_FILE
+    end
 end
 
-# Change to workspace directory
-if test -d /workspace
-    cd /workspace
+# Change to workspace directory (only for interactive sessions)
+if status is-interactive
+    if test -d /workspace
+        cd /workspace
+    end
 end
 
-# Display available tools
-echo "Available tools:"
-echo "  - ops-scripts: mount-nfs, tar-backup, rsync-backup, pvt.sh"
-echo "  - Network diagnostics: nmap, iperf3, mtr, tcpdump, traceroute"
-echo "  - Disk recovery: ddrescue, testdisk, photorec, foremost"
-echo "  - System monitoring: htop, iotop, lsof, strace"
-echo "  - File management: mc, tree, ncdu"
-echo "  - Run 'setup-session' to start tmux with multiple windows"
-echo
+# Display available tools (only for interactive sessions)
+if status is-interactive
+    echo "Welcome to Alvaone System Tools"
+    echo
+    echo "    Run 'setup-session' to start tmux with multiple windows"
+    echo
+    echo "Available tools:"
+    echo "  - ops-scripts: mount-nfs, tar-backup, rsync-backup, pvt.sh"
+    echo "  - Network diagnostics: nmap, iperf3, mtr, tcpdump, traceroute"
+    echo "  - Disk recovery: ddrescue, testdisk, photorec, foremost"
+    echo "  - System monitoring: htop, iotop, lsof, strace"
+    echo "  - File management: mc, tree, ncdu"
+    echo
+end
+
+# Alvaone System Tools fish configuration
+set -g fish_greeting "Ready to process commands..."
 EOF
 
     msg2 "User configurations setup completed successfully"
@@ -964,6 +993,11 @@ setup_motd_branding() {
     # Create MOTD script
     cat > "$MOUNT_ROOT/root/motd.sh" << 'EOF'
 #!/usr/bin/env bash
+
+# Only show MOTD for interactive shells
+if [[ ! -t 0 ]] || [[ -n "$SSH_ORIGINAL_COMMAND" ]]; then
+    exit 0
+fi
 
 echo
 echo " █████╗ ██╗    ██╗   ██╗ █████╗  ██████╗ ███╗   ██╗███████╗"
@@ -1167,6 +1201,7 @@ if [[ "$CONFIG_UPDATE" == true ]]; then
     setup_motd_branding || exit 1
     setup_session_tools || exit 1
     setup_environment || exit 1
+    configure_ssh_keys || exit 1
     copy_ops_scripts || exit 1
 else
     # Full creation mode - all configuration steps
@@ -1174,6 +1209,7 @@ else
     configure_systemd || exit 1
     configure_swap || exit 1
     configure_ssh || exit 1
+    configure_ssh_keys || exit 1
     configure_memtest || exit 1
     setup_bootloader || exit 1
     generate_initramfs || exit 1

@@ -77,7 +77,7 @@ REPO_SERVER="nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo"
 if mountpoint -q "$REPO_MOUNT"; then
     msg2 "Alvaone repository already mounted at $REPO_MOUNT"
 else
-    mount --mkdir -o _netdev,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5 "$REPO_SERVER" "$REPO_MOUNT"
+    mount --mkdir -o _netdev,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600 "$REPO_SERVER" "$REPO_MOUNT"
     if mountpoint -q "$REPO_MOUNT"; then
         msg2 "Alvaone repository mounted successfully at $REPO_MOUNT"
     else
@@ -94,7 +94,7 @@ CACHE_SERVER="nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache"
 if mountpoint -q "$CACHE_MOUNT"; then
     msg2 "Package cache already mounted at $CACHE_MOUNT"
 else
-    mount --mkdir -o _netdev,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5 "$CACHE_SERVER" "$CACHE_MOUNT"
+    mount --mkdir -o _netdev,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600 "$CACHE_SERVER" "$CACHE_MOUNT"
     if mountpoint -q "$CACHE_MOUNT"; then
         msg2 "Package cache mounted successfully at $CACHE_MOUNT"
     else

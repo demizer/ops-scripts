@@ -72,7 +72,7 @@ NFS_SERVER="nas.alvaone.net:/mnt/bigdata/backups"
 if mountpoint -q "$NFS_MOUNT"; then
     msg2 "NFS share already mounted at $NFS_MOUNT"
 else
-    mount --mkdir -o noauto,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5 "$NFS_SERVER" "$NFS_MOUNT"
+    mount --mkdir -o _netdev,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600 "$NFS_SERVER" "$NFS_MOUNT"
     if mountpoint -q "$NFS_MOUNT"; then
         msg2 "NFS share mounted successfully at $NFS_MOUNT"
     else

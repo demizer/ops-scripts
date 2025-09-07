@@ -663,9 +663,9 @@ EOF
     cat >> "$MOUNT_ROOT/etc/fstab" << 'EOF'
 
 # NFS mounts for alvaone repository and backups
-192.168.5.16:/mnt/bigdata/arch_repo/alvaone_repo         /mnt/arch_repo          nfs4    _netdev,noatime,nodiratime,x-systemd.automount,x-systemd.mount-timeout=10,timeo=600,x-systemd.idle-timeout=1min 0 0
-192.168.5.16:/mnt/bigdata/arch_repo/pac_cache            /mnt/arch_pkg_cache     nfs4    _netdev,noatime,nodiratime,x-systemd.automount,x-systemd.mount-timeout=10,timeo=600,x-systemd.idle-timeout=1min 0 0
-192.168.5.16:/mnt/bigdata/backups                        /mnt/backups            nfs4    _netdev,noatime,nodiratime,x-systemd.automount,x-systemd.mount-timeout=10,timeo=600,x-systemd.idle-timeout=1min 0 0
+nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo     /mnt/arch_repo          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
+nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache        /mnt/arch_pkg_cache     nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
+nas.alvaone.net:/mnt/bigdata/backups                    /mnt/backups            nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
 EOF
 
     # Set hostname
@@ -812,7 +812,7 @@ Wants=network-online.target
 What=nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo
 Where=/mnt/arch_repo
 Type=nfs
-Options=_netdev,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5
+Options=_netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600
 
 [Install]
 WantedBy=multi-user.target
@@ -829,7 +829,7 @@ Wants=network-online.target
 What=nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache
 Where=/mnt/arch_pkg_cache
 Type=nfs
-Options=_netdev,noatime,nodiratime,proto=tcp,rsize=131072,wsize=131072,hard,intr,timeo=600,retrans=5
+Options=_netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600
 
 [Install]
 WantedBy=multi-user.target
