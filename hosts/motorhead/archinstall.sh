@@ -438,6 +438,41 @@ done
 
 # Only run setup and confirmations for full installation
 if [[ "$ANY_STEP_FLAG" != true && "$CHROOT_MODE" != true ]]; then
+    # Check if /mnt/root is mounted and unmount it
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
+        msg "Unmounting existing installation at $MOUNT_ROOT..."
+        umount -R "$MOUNT_ROOT" || {
+            err "Failed to unmount $MOUNT_ROOT"
+        }
+    fi
+
+    # Check if any partitions of the target device are mounted elsewhere and unmount them
+    target_device_path=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
+    target_device_name=$(basename "$target_device_path")
+
+    msg "Checking for mounted partitions on target device..."
+    mounted_partitions=$(mount | grep "$target_device_name" | awk '{print $1}' || true)
+    if [[ -n "$mounted_partitions" ]]; then
+        msg "Unmounting target device partitions..."
+        echo "$mounted_partitions" | while read -r partition; do
+            mountpoint=$(mount | grep "$partition" | awk '{print $3}')
+            msg "Unmounting $partition from $mountpoint"
+            umount "$partition" 2> /dev/null || warn "Failed to unmount $partition"
+        done
+    else
+        msg "No mounted partitions found on target device"
+    fi
+
+    # Turn off any swap on target device
+    if swapon --show | grep -q "$target_device_name"; then
+        msg "Disabling swap on target device..."
+        swapon --show | grep "$target_device_name" | awk '{print $1}' | while read -r swap_partition; do
+            swapoff "$swap_partition" || warn "Failed to disable swap on $swap_partition"
+        done
+    fi
+
+    sleep 2
+
     # Cache password for both root and user (unless --force is used) - ask early
     if [[ "$FORCE" != true ]]; then
         while true; do
@@ -934,57 +969,6 @@ setup_pacman_and_repos() {
         fi
     fi
 
-    # Copy NFS mount configuration for alvaone repo
-    if mountpoint -q /mnt/arch_repo 2> /dev/null && mountpoint -q /mnt/arch_pkg_cache 2> /dev/null; then
-        # Create systemd mount units for the new system
-        mkdir -p "$MOUNT_ROOT/etc/systemd/system"
-
-        # Alvaone repo mount
-        cat > "$MOUNT_ROOT/etc/systemd/system/mnt-arch_repo.mount" << 'EOF'
-[Unit]
-Description=Alvaone Repository NFS Mount
-After=network-online.target
-Wants=network-online.target
-
-[Mount]
-What=nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo
-Where=/mnt/arch_repo
-Type=nfs
-Options=_netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-        # Package cache mount
-        cat > "$MOUNT_ROOT/etc/systemd/system/mnt-arch_pkg_cache.mount" << 'EOF'
-[Unit]
-Description=Package Cache NFS Mount
-After=network-online.target
-Wants=network-online.target
-
-[Mount]
-What=nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache
-Where=/mnt/arch_pkg_cache
-Type=nfs
-Options=_netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=600
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-        # Enable the mounts
-        run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" systemctl enable mnt-arch_repo.mount || {
-            err "Failed to enable mnt-arch_repo.mount"
-            return 1
-        }
-        run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" systemctl enable mnt-arch_pkg_cache.mount || {
-            err "Failed to enable mnt-arch_pkg_cache.mount"
-            return 1
-        }
-
-        msg "Configured NFS mounts for new system"
-    fi
 }
 
 # Helper function to setup repository bind mounts
