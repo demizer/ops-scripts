@@ -36,11 +36,11 @@ EOF
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
-        -m|--mount-root)
+        -m | --mount-root)
             MOUNT_ROOT="$2"
             shift 2
             ;;
@@ -70,7 +70,7 @@ msg "Groups: $HOST_GROUPS"
 msg "Creating user $USERNAME in new system..."
 
 # Check if user already exists
-if arch-chroot "$MOUNT_ROOT" id "$USERNAME" >/dev/null 2>&1; then
+if arch-chroot "$MOUNT_ROOT" id "$USERNAME" > /dev/null 2>&1; then
     msg "User $USERNAME already exists, updating settings..."
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" usermod -u "$HOST_UID" -g "$HOST_GID" -s "$HOST_SHELL" -c "$HOST_GECOS" "$USERNAME" || {
         warn "Failed to update user settings"
@@ -94,14 +94,14 @@ for group in "${GROUP_ARRAY[@]}"; do
     # Skip primary group and add others
     if [[ "$group" != "$USERNAME" ]]; then
         # Check if group exists before trying to create it
-        if ! arch-chroot "$MOUNT_ROOT" getent group "$group" >/dev/null 2>&1; then
+        if ! arch-chroot "$MOUNT_ROOT" getent group "$group" > /dev/null 2>&1; then
             msg "Creating group $group..."
             run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" groupadd "$group" || {
                 warn "Failed to create group $group"
                 continue
             }
         fi
-        
+
         # Add user to group
         msg "Adding user $USERNAME to group $group..."
         run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" usermod -a -G "$group" "$USERNAME" || {

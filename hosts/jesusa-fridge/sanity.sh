@@ -42,7 +42,7 @@ EOF
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
@@ -83,7 +83,7 @@ check_result() {
     local check_name="$1"
     local success="$2"
     local details="$3"
-    
+
     if [[ "$success" == "true" ]]; then
         msg "✓ $check_name"
         [[ -n "$details" ]] && msg "  $details"
@@ -105,7 +105,7 @@ fi
 
 # Check 2: GDM service is enabled
 msg "Checking GDM service status..."
-if arch-chroot "$MOUNT_ROOT" systemctl is-enabled gdm >/dev/null 2>&1; then
+if arch-chroot "$MOUNT_ROOT" systemctl is-enabled gdm > /dev/null 2>&1; then
     check_result "GDM service is enabled" "true" "systemctl is-enabled gdm: enabled"
 else
     check_result "GDM service is enabled" "false" "GDM service is not enabled"
@@ -142,7 +142,7 @@ if [[ -f "$fstab_file" ]]; then
     else
         check_result "/etc/fstab has EFI partition entry" "false" "No EFI partition (/boot) found in fstab"
     fi
-    
+
     # Check for root partition
     if grep -q "/ " "$fstab_file"; then
         root_entry=$(grep "/ " "$fstab_file" | head -1)
@@ -150,7 +150,7 @@ if [[ -f "$fstab_file" ]]; then
     else
         check_result "/etc/fstab has root partition entry" "false" "No root partition (/) found in fstab"
     fi
-    
+
     # Check for NFS mounts
     if grep -q "arch_repo" "$fstab_file" && grep -q "arch_pkg_cache" "$fstab_file"; then
         check_result "/etc/fstab has NFS repository mounts" "true" "arch_repo and arch_pkg_cache configured"
@@ -171,17 +171,17 @@ if [[ -d "$boot_dir" ]]; then
     else
         check_result "EFI partition has GRUB directory" "false" "/boot/EFI/GRUB not found"
     fi
-    
+
     # Check for initramfs files
-    if ls "$boot_dir"/initramfs-linux-zen*.img >/dev/null 2>&1; then
+    if ls "$boot_dir"/initramfs-linux-zen*.img > /dev/null 2>&1; then
         initramfs_files=$(ls "$boot_dir"/initramfs-linux-zen*.img | wc -l)
         check_result "EFI partition contains initramfs files" "true" "$initramfs_files initramfs files found"
     else
         check_result "EFI partition contains initramfs files" "false" "No initramfs-linux-zen*.img files found"
     fi
-    
+
     # Check for kernel files
-    if ls "$boot_dir"/vmlinuz-linux-zen >/dev/null 2>&1; then
+    if ls "$boot_dir"/vmlinuz-linux-zen > /dev/null 2>&1; then
         kernel_file=$(ls -la "$boot_dir"/vmlinuz-linux-zen | awk '{print $5 " bytes"}')
         check_result "EFI partition contains kernel file" "true" "vmlinuz-linux-zen ($kernel_file)"
     else
@@ -195,7 +195,7 @@ fi
 msg "Checking essential services..."
 services=("NetworkManager" "sshd")
 for service in "${services[@]}"; do
-    if arch-chroot "$MOUNT_ROOT" systemctl is-enabled "$service" >/dev/null 2>&1; then
+    if arch-chroot "$MOUNT_ROOT" systemctl is-enabled "$service" > /dev/null 2>&1; then
         check_result "$service service is enabled" "true"
     else
         check_result "$service service is enabled" "false" "$service is not enabled"
@@ -220,10 +220,10 @@ fi
 
 # Check 8: User configuration
 msg "Checking user configuration..."
-if arch-chroot "$MOUNT_ROOT" id jesusa >/dev/null 2>&1; then
+if arch-chroot "$MOUNT_ROOT" id jesusa > /dev/null 2>&1; then
     user_info=$(arch-chroot "$MOUNT_ROOT" id jesusa)
     check_result "User 'jesusa' exists" "true" "$user_info"
-    
+
     # Check if jesusa is in wheel group
     if arch-chroot "$MOUNT_ROOT" groups jesusa | grep -q wheel; then
         check_result "User 'jesusa' is in wheel group" "true" "Has sudo access"

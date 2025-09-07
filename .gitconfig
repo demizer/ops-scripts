@@ -33,4 +33,3 @@
 [safe]
 	directory = /opt/esp-idf
 	directory = /opt/esp-idf/components/openthread/openthread
-

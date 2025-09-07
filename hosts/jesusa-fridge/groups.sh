@@ -31,11 +31,11 @@ EOF
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
-        -m|--mount-root)
+        -m | --mount-root)
             MOUNT_ROOT="$2"
             shift 2
             ;;
@@ -59,7 +59,7 @@ msg "Configuring bigdata group"
 
 # Create bigdata group with specific GID
 msg "Checking if bigdata group exists..."
-existing_gid=$(arch-chroot "$MOUNT_ROOT" getent group bigdata 2>/dev/null | cut -d: -f3)
+existing_gid=$(arch-chroot "$MOUNT_ROOT" getent group bigdata 2> /dev/null | cut -d: -f3)
 
 if [[ -n "$existing_gid" ]]; then
     if [[ "$existing_gid" != "$BIGDATA_GID" ]]; then

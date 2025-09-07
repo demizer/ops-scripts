@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/../../lib.sh"
 DEVICE="/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_2TB_S7L9NJ0Y438532K"
 
 # Try to find the actual device name (e.g., /dev/nvme0n1)
-REAL_DEVICE=$(readlink -f "$DEVICE" 2>/dev/null || echo "$DEVICE")
+REAL_DEVICE=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
 echo "Real device: $REAL_DEVICE"
 
 # Use the real device path for partitions

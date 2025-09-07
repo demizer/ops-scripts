@@ -38,7 +38,7 @@ OPTIONS:
     -h, --help              Show this help message
     --help-long             Show detailed descriptions of each step
     -f, --force             Skip confirmation prompts
-    
+
 STEP OPTIONS (run individual or multiple steps):
     --partition             Run partitioning step
     --format                Run formatting step
@@ -53,24 +53,24 @@ STEP OPTIONS (run individual or multiple steps):
     --groups                Run group configuration
     --users                 Run user configuration
     --sanity                Run boot readiness verification
-    
+
     Note: Multiple steps can be combined and will run in correct logical order
-    
+
     --steps-from STEP       Run from specified step to end
 
 EXAMPLES:
     $0                                          # Full installation
     $0 --force                                  # Full installation, skip prompts
-    
+
     # Single steps:
     $0 --partition                              # Only partition device
     $0 --configure-pacman                       # Only configure pacman.conf
-    
+
     # Multiple steps (run in logical order regardless of command line order):
     $0 --format --mount                         # Format then mount
     $0 --nvidia --groups --users               # Configure NVIDIA, then groups, then users
     $0 --packages --nvidia                     # Install packages then configure NVIDIA
-    
+
     # Range of steps:
     $0 --steps-from configure-pacman            # Run from pacman config to end
 
@@ -87,7 +87,7 @@ OPTIONS:
     -h, --help              Show this help message
     --help-long             Show detailed descriptions of each step
     -f, --force             Skip confirmation prompts
-    
+
 STEP OPTIONS (run individual or multiple steps):
 
 DETAILED STEP DESCRIPTIONS:
@@ -185,22 +185,22 @@ DETAILED STEP DESCRIPTIONS:
     - Checks initramfs and kernel files exist
     - Verifies essential services and user config
     - Tests NVIDIA module configuration
-    
+
     --steps-from STEP       Run from specified step to end
 
 EXAMPLES:
     $0                                          # Full installation
     $0 --force                                  # Full installation, skip prompts
-    
+
     # Single steps:
     $0 --partition                              # Only partition device
     $0 --configure-pacman                       # Only configure pacman.conf
-    
+
     # Multiple steps (run in logical order regardless of command line order):
     $0 --format --mount                         # Format then mount
     $0 --nvidia --groups --users               # Configure NVIDIA, then groups, then users
     $0 --packages --nvidia                     # Install packages then configure NVIDIA
-    
+
     # Range of steps:
     $0 --steps-from configure-pacman            # Run from pacman config to end
 
@@ -228,7 +228,7 @@ STEP_SANITY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
@@ -236,7 +236,7 @@ while [[ $# -gt 0 ]]; do
             show_help_long
             exit 0
             ;;
-        -f|--force)
+        -f | --force)
             FORCE=true
             shift
             ;;
@@ -435,7 +435,7 @@ fi
 # Setup alvaone repository first
 setup_alvaone_repo() {
     msg "Setting up alvaone repository..."
-    
+
     local setup_script="$SCRIPT_DIR/../../usb-tools/setup-alvaone-repo.sh"
     if [[ -f "$setup_script" ]]; then
         "$setup_script" || {
@@ -465,7 +465,7 @@ if [[ "$ANY_STEP_FLAG" != true ]]; then
 
     # Show device information
     msg "Target device: $DEVICE"
-    lsblk "$DEVICE" 2>/dev/null | sed 's/^/    /' || {
+    lsblk "$DEVICE" 2> /dev/null | sed 's/^/    /' || {
         err "Failed to read device information"
     }
 
@@ -484,7 +484,7 @@ fi
 # Function to ask user about unmounting (on any exit)
 ask_unmount_on_exit() {
     local exit_code=$?
-    if mountpoint -q "$MOUNT_ROOT" 2>/dev/null; then
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
         echo
         if [[ $exit_code -ne 0 ]]; then
             warn "Installation failed. The filesystem is still mounted for debugging."
@@ -492,7 +492,7 @@ ask_unmount_on_exit() {
         read -p "Do you want to unmount $MOUNT_ROOT? (y/N): " -r
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             msg "Unmounting $MOUNT_ROOT"
-            umount -R "$MOUNT_ROOT" 2>/dev/null
+            umount -R "$MOUNT_ROOT" 2> /dev/null
             msg "Unmounted successfully"
         else
             msg "Leaving $MOUNT_ROOT mounted"
@@ -502,12 +502,12 @@ ask_unmount_on_exit() {
 
 # Function to ask user about unmounting at the end of successful installation
 ask_unmount() {
-    if mountpoint -q "$MOUNT_ROOT" 2>/dev/null; then
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
         echo
         read -p "Do you want to unmount $MOUNT_ROOT? (y/N): " -r
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             msg "Unmounting $MOUNT_ROOT"
-            umount -R "$MOUNT_ROOT" 2>/dev/null
+            umount -R "$MOUNT_ROOT" 2> /dev/null
             msg "Unmounted successfully"
         else
             msg "Leaving $MOUNT_ROOT mounted"
@@ -519,26 +519,24 @@ ask_unmount() {
 cleanup_on_signal() {
     local signal=$1
     msg "Received signal $signal - cleaning up and exiting..."
-    
+
     # Clean up any bind mounts that might still be active
-    if mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2>/dev/null; then
-        umount "$MOUNT_ROOT/mnt/arch_repo" 2>/dev/null || true
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null; then
+        umount "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null || true
     fi
-    if mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2>/dev/null; then
-        umount "$MOUNT_ROOT/mnt/arch_pkg_cache" 2>/dev/null || true
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null; then
+        umount "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null || true
     fi
-    
+
     # Call the normal exit handler
     ask_unmount_on_exit
-    exit 130  # Standard exit code for Ctrl+C
+    exit 130 # Standard exit code for Ctrl+C
 }
 
 # Set up signal traps for immediate response
 trap 'cleanup_on_signal SIGINT' INT
 trap 'cleanup_on_signal SIGTERM' TERM
 trap ask_unmount_on_exit EXIT
-
-
 
 # Step 4: Install base system with pacstrap
 install_base_system() {
@@ -585,11 +583,11 @@ install_base_system() {
     ls -la "$MOUNT_ROOT" || true
     msg "Active mounts:"
     mount | grep "$MOUNT_ROOT" || true
-    
+
     # Run pacstrap to install base packages with verbose output
     msg "Running pacstrap with packages: ${base_packages[*]}"
     msg "Command: pacstrap -c '$MOUNT_ROOT' --noconfirm ${base_packages[*]}"
-    
+
     # Run pacstrap and capture both stdout and stderr
     if ! pacstrap -c "$MOUNT_ROOT" --noconfirm "${base_packages[@]}" 2>&1 | tee /tmp/pacstrap.log; then
         err "Failed to install base system"
@@ -611,7 +609,7 @@ install_base_system() {
             missing_dirs+=("$dir")
         fi
     done
-    
+
     if [[ ${#missing_dirs[@]} -gt 0 ]]; then
         err "Base system installation incomplete - missing directories: ${missing_dirs[*]}"
         msg "Mount point contents after pacstrap:"
@@ -629,7 +627,7 @@ install_base_system() {
             missing_files+=("$file")
         fi
     done
-    
+
     if [[ ${#missing_files[@]} -gt 0 ]]; then
         warn "Some expected files missing: ${missing_files[*]}"
         msg "This may indicate an incomplete installation"
@@ -639,8 +637,8 @@ install_base_system() {
     sync
     msg "Base system installed successfully"
     msg "Installation summary:"
-    msg "  Root filesystem size: $(du -sh "$MOUNT_ROOT" 2>/dev/null | cut -f1 || echo "unknown")"
-    msg "  Key directories present: $(ls -d "$MOUNT_ROOT"/{etc,usr,bin,sbin,lib} 2>/dev/null | wc -l || echo "0")/5"
+    msg "  Root filesystem size: $(du -sh "$MOUNT_ROOT" 2> /dev/null | cut -f1 || echo "unknown")"
+    msg "  Key directories present: $(ls -d "$MOUNT_ROOT"/{etc,usr,bin,sbin,lib} 2> /dev/null | wc -l || echo "0")/5"
 }
 
 # Step 5: Configure the system
@@ -654,13 +652,13 @@ configure_system() {
 
 # <file system> <dir> <type> <options> <dump> <pass>
 EOF
-    
+
     # Generate fstab entries and append
     genfstab -U "$MOUNT_ROOT" >> "$MOUNT_ROOT/etc/fstab" || {
         err "Failed to generate fstab"
         return 1
     }
-    
+
     # Add additional NFS mounts
     cat >> "$MOUNT_ROOT/etc/fstab" << 'EOF'
 
@@ -776,20 +774,20 @@ setup_pacman_and_repos() {
     if [[ -f "$MOUNT_ROOT/etc/pacman.conf" ]]; then
         # Update CacheDir setting
         sed -i 's|^#CacheDir.*|CacheDir    = /mnt/arch_pkg_cache/ # trailing slash required|' "$MOUNT_ROOT/etc/pacman.conf"
-        
+
         # Uncomment VerbosePkgLists
         sed -i 's|^#VerbosePkgLists|VerbosePkgLists|' "$MOUNT_ROOT/etc/pacman.conf"
-        
+
         # Uncomment multilib repository
         sed -i '/^#\[multilib\]/,/^#Include = \/etc\/pacman.d\/mirrorlist/{s/^#//}' "$MOUNT_ROOT/etc/pacman.conf"
-        
+
         msg "Updated CacheDir, VerbosePkgLists, and enabled multilib repository in pacman.conf"
     fi
 
     # Copy alvaone repo setup if the host has it configured
     if [[ -f /etc/pacman.d/alvaone ]]; then
         cp /etc/pacman.d/alvaone "$MOUNT_ROOT/etc/pacman.d/"
-        
+
         # Update pacman.conf in new system to include alvaone repo
         if ! grep -q "Include.*alvaone" "$MOUNT_ROOT/etc/pacman.conf"; then
             echo "" >> "$MOUNT_ROOT/etc/pacman.conf"
@@ -799,10 +797,10 @@ setup_pacman_and_repos() {
     fi
 
     # Copy NFS mount configuration for alvaone repo
-    if mountpoint -q /mnt/arch_repo 2>/dev/null && mountpoint -q /mnt/arch_pkg_cache 2>/dev/null; then
+    if mountpoint -q /mnt/arch_repo 2> /dev/null && mountpoint -q /mnt/arch_pkg_cache 2> /dev/null; then
         # Create systemd mount units for the new system
         mkdir -p "$MOUNT_ROOT/etc/systemd/system"
-        
+
         # Alvaone repo mount
         cat > "$MOUNT_ROOT/etc/systemd/system/mnt-arch_repo.mount" << 'EOF'
 [Unit]
@@ -846,7 +844,7 @@ EOF
             err "Failed to enable mnt-arch_pkg_cache.mount"
             return 1
         }
-        
+
         msg "Configured NFS mounts for new system"
     fi
 }
@@ -861,8 +859,8 @@ setup_repository_bind_mounts() {
     }
 
     # Bind mount alvaone repository and package cache from host if available
-    if mountpoint -q /mnt/arch_repo 2>/dev/null; then
-        if ! mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2>/dev/null; then
+    if mountpoint -q /mnt/arch_repo 2> /dev/null; then
+        if ! mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null; then
             msg "Bind mounting alvaone repository..."
             mount --bind /mnt/arch_repo "$MOUNT_ROOT/mnt/arch_repo" || {
                 err "Failed to bind mount alvaone repository"
@@ -873,8 +871,8 @@ setup_repository_bind_mounts() {
         warn "Host alvaone repository not mounted - packages.sh may fail"
     fi
 
-    if mountpoint -q /mnt/arch_pkg_cache 2>/dev/null; then
-        if ! mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2>/dev/null; then
+    if mountpoint -q /mnt/arch_pkg_cache 2> /dev/null; then
+        if ! mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null; then
             msg "Bind mounting package cache..."
             mount --bind /mnt/arch_pkg_cache "$MOUNT_ROOT/mnt/arch_pkg_cache" || {
                 err "Failed to bind mount package cache"
@@ -889,10 +887,10 @@ setup_repository_bind_mounts() {
 # Helper function to cleanup repository bind mounts
 cleanup_repository_bind_mounts() {
     msg "Cleaning up bind mounts..."
-    if mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2>/dev/null; then
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null; then
         umount "$MOUNT_ROOT/mnt/arch_repo" || warn "Failed to unmount alvaone repository bind mount"
     fi
-    if mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2>/dev/null; then
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null; then
         umount "$MOUNT_ROOT/mnt/arch_pkg_cache" || warn "Failed to unmount package cache bind mount"
     fi
 }
@@ -910,7 +908,7 @@ install_packages() {
     msg "Source: $SCRIPT_DIR/packages.sh"
     msg "Mount point: $MOUNT_ROOT"
     msg "Target: $MOUNT_ROOT/root/"
-    
+
     # Ensure the /root directory exists in chroot
     mkdir -p "$MOUNT_ROOT/root" || {
         err "Failed to create /root directory in chroot"
@@ -929,13 +927,13 @@ install_packages() {
     if [[ ! -f "$MOUNT_ROOT/root/packages.sh" ]]; then
         err "packages.sh was not successfully copied to $MOUNT_ROOT/root/"
     fi
-    
+
     msg "Successfully copied packages.sh to chroot environment"
 
     # Run packages installation in chroot with better signal handling
     msg "Running packages installation..."
     msg "Note: This may take a while. Press Ctrl+C to cancel if needed."
-    
+
     # Use a more direct approach that handles signals better
     if ! arch-chroot "$MOUNT_ROOT" /root/packages.sh --force; then
         # Clean up bind mounts even on failure
@@ -956,7 +954,6 @@ install_packages() {
         msg "Keeping bind mounts for subsequent steps"
     fi
 
-
     # Enable gdm service now that it's installed
     msg "Enabling gdm service..."
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" systemctl enable gdm || {
@@ -970,7 +967,7 @@ install_packages() {
 # Step 9.5: Configure NVIDIA modules (after packages are installed)
 configure_nvidia_modules() {
     msg "Configuring NVIDIA modules in mkinitcpio.conf..."
-    
+
     # Configure NVIDIA modules in mkinitcpio.conf after packages are installed
     sed -i 's/^MODULES=.*/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' "$MOUNT_ROOT/etc/mkinitcpio.conf" || {
         err "Failed to configure NVIDIA modules in mkinitcpio.conf"
@@ -983,7 +980,7 @@ configure_nvidia_modules() {
         err "Failed to regenerate initramfs with NVIDIA modules"
         return 1
     }
-    
+
     msg "NVIDIA modules configuration completed"
 }
 
@@ -1018,12 +1015,12 @@ configure_groups() {
         err "Failed to set group ownership on bigdata directories"
         return 1
     }
-    
+
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chmod g+w /mnt/arch_repo /mnt/arch_pkg_cache /mnt/backups || {
         err "Failed to set group write permissions on bigdata directories"
         return 1
     }
-    
+
     # Set sticky bit so new files inherit group ownership
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chmod g+s /mnt/arch_repo /mnt/arch_pkg_cache /mnt/backups || {
         err "Failed to set sticky bit on bigdata directories"
@@ -1071,11 +1068,10 @@ perform_sanity_check() {
     msg "Sanity check completed successfully"
 }
 
-
 # Execute installation steps
 if [[ "$ANY_STEP_FLAG" == true ]]; then
     msg "Running selected installation steps in correct order..."
-    
+
     # Count selected steps for progress tracking
     selected_steps=()
     [[ "$STEP_PARTITION" == true ]] && selected_steps+=("partition")
@@ -1091,29 +1087,94 @@ if [[ "$ANY_STEP_FLAG" == true ]]; then
     [[ "$STEP_GROUPS" == true ]] && selected_steps+=("groups")
     [[ "$STEP_USERS" == true ]] && selected_steps+=("users")
     [[ "$STEP_SANITY" == true ]] && selected_steps+=("sanity")
-    
+
     msg "Selected steps (${#selected_steps[@]}): ${selected_steps[*]}"
     echo
-    
+
     # Run individual steps in correct order (always run in logical sequence)
-    [[ "$STEP_PARTITION" == true ]] && { msg "Step 1: Partitioning device..."; "$SCRIPT_DIR/partition.sh" || exit 1; msg "✓ Partitioning completed"; echo; }
-    [[ "$STEP_FORMAT" == true ]] && { msg "Step 2: Formatting partitions..."; "$SCRIPT_DIR/format.sh" $([[ "$FORCE" == true ]] && echo "--force") || exit 1; msg "✓ Formatting completed"; echo; }
-    [[ "$STEP_MOUNT" == true ]] && { msg "Step 3: Mounting partitions..."; "$SCRIPT_DIR/mount.sh" || exit 1; msg "✓ Partitions mounted at $MOUNT_ROOT"; echo; }
-    [[ "$STEP_BASE_SYSTEM" == true ]] && { msg "Step 4: Installing base system..."; install_base_system || exit 1; msg "✓ Base system installation completed"; echo; }
-    [[ "$STEP_CONFIGURE" == true ]] && { msg "Step 5: Configuring system..."; configure_system || exit 1; msg "✓ System configuration completed"; echo; }
-    [[ "$STEP_BOOTLOADER" == true ]] && { msg "Step 6: Setting up bootloader..."; setup_bootloader || exit 1; msg "✓ Bootloader setup completed"; echo; }
-    [[ "$STEP_INITRAMFS" == true ]] && { msg "Step 7: Generating initramfs..."; generate_initramfs || exit 1; msg "✓ Initramfs generation completed"; echo; }
-    [[ "$STEP_CONFIGURE_PACMAN" == true ]] && { msg "Step 8: Configuring pacman and repositories..."; setup_pacman_and_repos || exit 1; msg "✓ Pacman and repositories configuration completed"; echo; }
-    [[ "$STEP_PACKAGES" == true ]] && { msg "Step 9: Installing packages..."; install_packages || exit 1; msg "✓ Package installation completed"; echo; }
-    [[ "$STEP_NVIDIA" == true ]] && { msg "Step 9.5: Configuring NVIDIA modules..."; configure_nvidia_modules || exit 1; msg "✓ NVIDIA modules configuration completed"; echo; }
-    [[ "$STEP_GROUPS" == true ]] && { msg "Step 10: Configuring groups..."; configure_groups || exit 1; msg "✓ Group configuration completed"; echo; }
-    [[ "$STEP_USERS" == true ]] && { msg "Step 11: Configuring users..."; configure_users || exit 1; msg "✓ User configuration completed"; echo; }
-    [[ "$STEP_SANITY" == true ]] && { msg "Step 12: Performing sanity check..."; perform_sanity_check || exit 1; msg "✓ Sanity check completed"; echo; }
-    
+    [[ "$STEP_PARTITION" == true ]] && {
+        msg "Step 1: Partitioning device..."
+        "$SCRIPT_DIR/partition.sh" || exit 1
+        msg "✓ Partitioning completed"
+        echo
+    }
+    [[ "$STEP_FORMAT" == true ]] && {
+        msg "Step 2: Formatting partitions..."
+        "$SCRIPT_DIR/format.sh" $([[ "$FORCE" == true ]] && echo "--force") || exit 1
+        msg "✓ Formatting completed"
+        echo
+    }
+    [[ "$STEP_MOUNT" == true ]] && {
+        msg "Step 3: Mounting partitions..."
+        "$SCRIPT_DIR/mount.sh" || exit 1
+        msg "✓ Partitions mounted at $MOUNT_ROOT"
+        echo
+    }
+    [[ "$STEP_BASE_SYSTEM" == true ]] && {
+        msg "Step 4: Installing base system..."
+        install_base_system || exit 1
+        msg "✓ Base system installation completed"
+        echo
+    }
+    [[ "$STEP_CONFIGURE" == true ]] && {
+        msg "Step 5: Configuring system..."
+        configure_system || exit 1
+        msg "✓ System configuration completed"
+        echo
+    }
+    [[ "$STEP_BOOTLOADER" == true ]] && {
+        msg "Step 6: Setting up bootloader..."
+        setup_bootloader || exit 1
+        msg "✓ Bootloader setup completed"
+        echo
+    }
+    [[ "$STEP_INITRAMFS" == true ]] && {
+        msg "Step 7: Generating initramfs..."
+        generate_initramfs || exit 1
+        msg "✓ Initramfs generation completed"
+        echo
+    }
+    [[ "$STEP_CONFIGURE_PACMAN" == true ]] && {
+        msg "Step 8: Configuring pacman and repositories..."
+        setup_pacman_and_repos || exit 1
+        msg "✓ Pacman and repositories configuration completed"
+        echo
+    }
+    [[ "$STEP_PACKAGES" == true ]] && {
+        msg "Step 9: Installing packages..."
+        install_packages || exit 1
+        msg "✓ Package installation completed"
+        echo
+    }
+    [[ "$STEP_NVIDIA" == true ]] && {
+        msg "Step 9.5: Configuring NVIDIA modules..."
+        configure_nvidia_modules || exit 1
+        msg "✓ NVIDIA modules configuration completed"
+        echo
+    }
+    [[ "$STEP_GROUPS" == true ]] && {
+        msg "Step 10: Configuring groups..."
+        configure_groups || exit 1
+        msg "✓ Group configuration completed"
+        echo
+    }
+    [[ "$STEP_USERS" == true ]] && {
+        msg "Step 11: Configuring users..."
+        configure_users || exit 1
+        msg "✓ User configuration completed"
+        echo
+    }
+    [[ "$STEP_SANITY" == true ]] && {
+        msg "Step 12: Performing sanity check..."
+        perform_sanity_check || exit 1
+        msg "✓ Sanity check completed"
+        echo
+    }
+
     msg "All selected steps completed successfully!"
 else
     msg "Starting Arch Linux installation..."
-    
+
     # Step 1: Partition the device
     msg "Step 1: Partitioning device..."
     "$SCRIPT_DIR/partition.sh" || {
@@ -1121,7 +1182,7 @@ else
         exit 1
     }
     msg "Partitioning completed"
-    
+
     # Step 2: Format partitions
     msg "Step 2: Formatting partitions..."
     "$SCRIPT_DIR/format.sh" $([[ "$FORCE" == true ]] && echo "--force") || {
@@ -1129,7 +1190,7 @@ else
         exit 1
     }
     msg "Formatting completed"
-    
+
     # Step 3: Mount partitions
     msg "Step 3: Mounting partitions..."
     "$SCRIPT_DIR/mount.sh" || {
@@ -1151,7 +1212,7 @@ else
 fi
 
 # Final cleanup of any remaining bind mounts
-cleanup_repository_bind_mounts 2>/dev/null || true
+cleanup_repository_bind_mounts 2> /dev/null || true
 
 # Final sync to ensure all data is written to disk
 msg "Performing final sync to ensure all data is written to disk..."

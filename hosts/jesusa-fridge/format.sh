@@ -11,11 +11,11 @@ FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -f|--force)
+        -f | --force)
             FORCE=true
             shift
             ;;
-        -h|--help)
+        -h | --help)
             echo "Usage: $0 [OPTIONS]"
             echo "Format partitions for jesusa-fridge"
             echo ""
@@ -40,7 +40,7 @@ run_cmd_no_subshell partprobe "$DEVICE"
 run_cmd_no_subshell sleep 2
 
 # Try to find the actual device name (e.g., /dev/nvme0n1)
-REAL_DEVICE=$(readlink -f "$DEVICE" 2>/dev/null || echo "$DEVICE")
+REAL_DEVICE=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
 echo "Real device: $REAL_DEVICE"
 
 # Use the real device path for partitions
@@ -81,32 +81,32 @@ if [[ "$FORCE" == true ]]; then
     MKSWAP_FORCE="-f"
     MKFS_EXT4_FORCE="-F"
     echo "Force mode enabled - will overwrite existing filesystems"
-    
+
     # Unmount any mounted partitions first
     echo "Checking for mounted partitions to unmount..."
     for part in "$PART1" "$PART2" "$PART3" "$PART4" "$PART5"; do
-        if mountpoint -q "$part" 2>/dev/null || mount | grep -q "^$part "; then
+        if mountpoint -q "$part" 2> /dev/null || mount | grep -q "^$part "; then
             echo "Unmounting $part..."
-            umount -R "$part" 2>/dev/null || {
+            umount -R "$part" 2> /dev/null || {
                 echo "Warning: Failed to unmount $part, trying lazy unmount..."
-                umount -l "$part" 2>/dev/null || {
+                umount -l "$part" 2> /dev/null || {
                     echo "Warning: Could not unmount $part"
                 }
             }
         fi
     done
-    
+
     # Also check for bind mounts or anything mounted under /mnt/root
-    if mountpoint -q /mnt/root 2>/dev/null; then
+    if mountpoint -q /mnt/root 2> /dev/null; then
         echo "Unmounting /mnt/root and all submounts..."
-        umount -R /mnt/root 2>/dev/null || {
+        umount -R /mnt/root 2> /dev/null || {
             echo "Warning: Failed to unmount /mnt/root, trying lazy unmount..."
-            umount -l /mnt/root 2>/dev/null || {
+            umount -l /mnt/root 2> /dev/null || {
                 echo "Warning: Could not unmount /mnt/root"
             }
         }
     fi
-    
+
     # Give the system a moment to process the unmounts
     sleep 2
 else

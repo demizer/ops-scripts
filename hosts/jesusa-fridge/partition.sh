@@ -7,20 +7,20 @@ source "$SCRIPT_DIR/../../lib.sh"
 DEVICE="/dev/disk/by-id/nvme-Samsung_SSD_990_PRO_2TB_S7L9NJ0Y438532K"
 
 # Get the real device path
-REAL_DEVICE=$(readlink -f "$DEVICE" 2>/dev/null || echo "$DEVICE")
+REAL_DEVICE=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
 echo "Unmounting any existing partitions on $REAL_DEVICE..."
 
 # Find all partitions on this device and unmount them
-for partition in $(lsblk -nr -o NAME "$REAL_DEVICE" 2>/dev/null | tail -n +2); do
+for partition in $(lsblk -nr -o NAME "$REAL_DEVICE" 2> /dev/null | tail -n +2); do
     partition_path="/dev/$partition"
-    if mountpoint -q "$partition_path" 2>/dev/null; then
+    if mountpoint -q "$partition_path" 2> /dev/null; then
         echo "Unmounting $partition_path"
         run_cmd_no_subshell umount "$partition_path" || run_cmd_no_subshell umount -f "$partition_path" || true
     fi
 done
 
 # Turn off any swap partitions on this device
-swapon --show=NAME --noheadings 2>/dev/null | grep "$REAL_DEVICE" | while read -r swap_part; do
+swapon --show=NAME --noheadings 2> /dev/null | grep "$REAL_DEVICE" | while read -r swap_part; do
     echo "Disabling swap on $swap_part"
     run_cmd_no_subshell swapoff "$swap_part" || true
 done

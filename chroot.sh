@@ -10,7 +10,7 @@ while [[ $# -gt 0 ]]; do
             USB_DEVICE="$2"
             shift 2
             ;;
-        -h|--help)
+        -h | --help)
             echo "Usage: $0 [--device DEVICE]"
             echo "  --device DEVICE    Use specific device (e.g., /dev/sda)"
             echo "  -h, --help         Show this help"
