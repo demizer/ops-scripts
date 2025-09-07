@@ -23,6 +23,9 @@ DEVICE="/dev/disk/by-id/nvme-KINGSTON_OM3PGP4128P-AH_0026B7382A48ED90"
 MOUNT_ROOT="/mnt/root"
 HOSTNAME="motorhead"
 
+# Password caching variable
+USER_PASSWORD=""
+
 # Setup logging
 LOG_FILE="archinstall-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG_FILE")
@@ -118,7 +121,7 @@ DETAILED STEP DESCRIPTIONS:
 5. --configure
    Configures the basic system settings:
    - Generates fstab with NFS mounts for repositories
-   - Sets hostname to motorhead
+   - Sets hostname to motorhead.alvaone.net
    - Configures locale (en_US.UTF-8) and timezone (LA)
    - Sets root password interactively
    - Configures sudo for wheel group
@@ -150,6 +153,7 @@ DETAILED STEP DESCRIPTIONS:
    - Media: vlc, obs-studio, gimp, krita
    - Professional: datagrip, pycharm, rustrover
    - System utilities and development tools
+   - automountnfs: NFS automounting via NetworkManager dispatcher
    Enables GDM for graphical login
 
     - Configures proper module loading order
@@ -428,6 +432,23 @@ done
 
 # Only run setup and confirmations for full installation
 if [[ "$ANY_STEP_FLAG" != true ]]; then
+    # Cache password for both root and user (unless --force is used) - ask early
+    if [[ "$FORCE" != true ]]; then
+        while true; do
+            msg "Please enter a password to use for both root and jesusa users:"
+            read -s -p "Password: " USER_PASSWORD
+            echo
+            read -s -p "Confirm password: " USER_PASSWORD_CONFIRM
+            echo
+            if [[ "$USER_PASSWORD" == "$USER_PASSWORD_CONFIRM" ]]; then
+                break
+            else
+                warn "Passwords do not match. Please try again."
+                echo
+            fi
+        done
+    fi
+
     # Setup alvaone repository at the very beginning
     setup_alvaone_repo
 
@@ -447,6 +468,23 @@ if [[ "$ANY_STEP_FLAG" != true ]]; then
             exit 0
         fi
     fi
+fi
+
+# Also cache password for specific step runs that need it
+if [[ "$STEP_CONFIGURE" == true || "$STEP_USERS" == true ]] && [[ -z "$USER_PASSWORD" ]]; then
+    while true; do
+        msg "Please enter a password to use for both root and jesusa users:"
+        read -s -p "Password: " USER_PASSWORD
+        echo
+        read -s -p "Confirm password: " USER_PASSWORD_CONFIRM
+        echo
+        if [[ "$USER_PASSWORD" == "$USER_PASSWORD_CONFIRM" ]]; then
+            break
+        else
+            warn "Passwords do not match. Please try again."
+            echo
+        fi
+    done
 fi
 
 # Function to ask user about unmounting (on any exit)
@@ -501,10 +539,28 @@ cleanup_on_signal() {
     exit 130 # Standard exit code for Ctrl+C
 }
 
+# Count selected steps to determine behavior
+SELECTED_STEP_COUNT=0
+[[ "$STEP_PARTITION" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_FORMAT" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_MOUNT" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_BASE_SYSTEM" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_CONFIGURE" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_BOOTLOADER" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_INITRAMFS" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_CONFIGURE_PACMAN" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_PACKAGES" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_GROUPS" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_USERS" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_SANITY" == true ]] && ((SELECTED_STEP_COUNT++))
+
 # Set up signal traps for immediate response
 trap 'cleanup_on_signal SIGINT' INT
 trap 'cleanup_on_signal SIGTERM' TERM
-trap ask_unmount_on_exit EXIT
+# Set EXIT trap for full installation or multiple steps, but not single steps
+if [[ "$ANY_STEP_FLAG" != true ]] || [[ "$SELECTED_STEP_COUNT" -gt 1 ]]; then
+    trap ask_unmount_on_exit EXIT
+fi
 
 # Helper function for step signposting
 step_begin() {
@@ -641,23 +697,103 @@ configure_system() {
 # <file system> <dir> <type> <options> <dump> <pass>
 EOF
 
-    # Generate fstab entries and append
-    genfstab -U "$MOUNT_ROOT" >> "$MOUNT_ROOT/etc/fstab" || {
+    # Generate fstab entries and append, filtering out non-target devices
+    # Get the target device name to only include partitions from our target device
+    target_device_path=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
+    target_device_name=$(basename "$target_device_path")
+
+    # Generate raw fstab and filter to only include target device partitions
+    genfstab -U "$MOUNT_ROOT" | while IFS= read -r line; do
+        # Handle comments - filter out comments for non-target devices
+        if [[ "$line" =~ ^[[:space:]]*# ]]; then
+            # Check if this comment references a non-target device
+            if [[ "$line" =~ /dev/[^[:space:]]+ ]]; then
+                comment_device=$(echo "$line" | grep -o '/dev/[^[:space:]]*')
+                comment_device_name=$(basename "$comment_device")
+                # Only include comments for our target device partitions
+                if [[ "$comment_device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                    echo "$line"
+                fi
+                # Skip comments for non-target devices (archiso, etc.)
+            else
+                # Include non-device comments (headers, etc.)
+                echo "$line"
+            fi
+            continue
+        fi
+
+        # Skip empty lines - pass them through
+        if [[ -z "${line// /}" ]]; then
+            echo "$line"
+            continue
+        fi
+
+        # Parse fstab entry
+        device=$(echo "$line" | awk '{print $1}')
+        mountpoint=$(echo "$line" | awk '{print $2}')
+        fstype=$(echo "$line" | awk '{print $3}')
+
+        # Skip special filesystems - pass them through
+        case "$fstype" in
+            proc | sysfs | devpts | tmpfs | devtmpfs)
+                echo "$line"
+                continue
+                ;;
+        esac
+
+        # Check if this device belongs to our target device
+        include_device=false
+        if [[ "$device" =~ ^UUID= ]]; then
+            uuid=${device#UUID=}
+            # Look up the actual device for this UUID
+            uuid_device=$(readlink -f "/dev/disk/by-uuid/$uuid" 2> /dev/null)
+            if [[ -n "$uuid_device" ]]; then
+                uuid_device_name=$(basename "$uuid_device")
+                # Only include if it's from our target device (e.g., nvme0n1p1-5)
+                if [[ "$uuid_device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                    include_device=true
+                fi
+            fi
+        elif [[ "$device" =~ ^/dev/ ]]; then
+            device_name=$(basename "$device")
+            # Only include if it's from our target device
+            if [[ "$device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                include_device=true
+            fi
+        fi
+
+        # Include the device if it passed validation
+        if [[ "$include_device" == "true" ]]; then
+            echo "$line"
+        else
+            # Output to stderr so it doesn't go into fstab file
+            msg "Filtering out non-target device from fstab: $device ($mountpoint, $fstype)" >&2
+        fi
+    done >> "$MOUNT_ROOT/etc/fstab" || {
         err "Failed to generate fstab"
         return 1
     }
 
-    # Add additional NFS mounts
+    # Add commented NFS mounts (managed by AutoMountNFS package and systemd service units)
     cat >> "$MOUNT_ROOT/etc/fstab" << 'EOF'
 
 # NFS mounts for alvaone repository and backups
-nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo     /mnt/arch_repo          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
-nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache        /mnt/arch_pkg_cache     nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
-nas.alvaone.net:/mnt/bigdata/backups                    /mnt/backups            nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,x-systemd.automount,x-systemd.after=network-online.target,x-systemd.mount-timeout=30,timeo=600,x-systemd.idle-timeout=1min 0 0
+# These comments are configuration for AutoMountNFS ONLY
+# These are managed by the AutoMountNFS package that manages systemd service units (not systemd auto mount handling since it is finicky)
+# nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo     /mnt/arch_repo          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=3 0 0
+# nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache        /mnt/arch_pkg_cache     nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=3 0 0
+# nas.alvaone.net:/mnt/bigdata/backups                    /mnt/backups            nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=3 0 0
 EOF
 
     # Set hostname
     echo "$HOSTNAME" > "$MOUNT_ROOT/etc/hostname"
+
+    # Set FQDN hostname using hostnamectl
+    msg "Setting FQDN hostname using hostnamectl..."
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" hostnamectl set-hostname "$HOSTNAME.alvaone.net" || {
+        err "Failed to set FQDN hostname with hostnamectl"
+        return 1
+    }
 
     # Configure locale
     echo "en_US.UTF-8 UTF-8" > "$MOUNT_ROOT/etc/locale.gen"
@@ -675,13 +811,20 @@ EOF
         return 1
     }
 
-    # Set root password interactively
+    # Set root password using cached password
     msg "Setting root password..."
-    msg "You will be prompted to enter a password for the root user"
-    arch-chroot "$MOUNT_ROOT" passwd root || {
-        err "Failed to set root password"
-        return 1
-    }
+    if [[ -n "$USER_PASSWORD" ]]; then
+        echo "root:$USER_PASSWORD" | arch-chroot "$MOUNT_ROOT" chpasswd || {
+            err "Failed to set root password"
+            return 1
+        }
+    else
+        msg "You will be prompted to enter a password for the root user"
+        arch-chroot "$MOUNT_ROOT" passwd root || {
+            err "Failed to set root password"
+            return 1
+        }
+    fi
 
     # Configure sudo
     echo "%wheel ALL=(ALL:ALL) ALL" >> "$MOUNT_ROOT/etc/sudoers"
@@ -703,10 +846,10 @@ EOF
     echo "PubkeyAuthentication yes" >> "$MOUNT_ROOT/etc/ssh/sshd_config"
 
     # Configure hostname resolution
-    cat > "$MOUNT_ROOT/etc/hosts" << 'EOF'
+    cat > "$MOUNT_ROOT/etc/hosts" << EOF
 127.0.0.1   localhost
 ::1         localhost
-127.0.1.1   motorhead.localdomain motorhead
+127.0.1.1   $HOSTNAME.alvaone.net $HOSTNAME
 EOF
 
     msg "System configured successfully"
@@ -715,6 +858,15 @@ EOF
 # Step 6: Install and configure bootloader
 setup_bootloader() {
     msg "Setting up GRUB bootloader..."
+
+    # Configure GRUB to show systemd boot messages (remove quiet and loglevel=3)
+    msg "Configuring GRUB for verbose boot with systemd messages..."
+
+    # Modify GRUB defaults to remove quiet boot and allow verbose systemd messages
+    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=".*"/GRUB_CMDLINE_LINUX_DEFAULT=""/' "$MOUNT_ROOT/etc/default/grub" || {
+        # If the file doesn't exist or sed fails, create/append the setting
+        echo 'GRUB_CMDLINE_LINUX_DEFAULT=""' >> "$MOUNT_ROOT/etc/default/grub"
+    }
 
     # Install GRUB to EFI partition
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB || {
@@ -728,7 +880,7 @@ setup_bootloader() {
         return 1
     }
 
-    msg "Bootloader configured successfully"
+    msg "Bootloader configured successfully with verbose systemd boot messages"
 }
 
 # Step 7: Generate initramfs
@@ -1000,11 +1152,18 @@ configure_users() {
         return 1
     fi
 
-    # Run users configuration
-    "$SCRIPT_DIR/06_users.sh" -m "$MOUNT_ROOT" || {
-        err "User configuration failed"
-        return 1
-    }
+    # Run users configuration with cached password
+    if [[ -n "$USER_PASSWORD" ]]; then
+        USER_PASSWORD="$USER_PASSWORD" "$SCRIPT_DIR/06_users.sh" -m "$MOUNT_ROOT" || {
+            err "User configuration failed"
+            return 1
+        }
+    else
+        "$SCRIPT_DIR/06_users.sh" -m "$MOUNT_ROOT" || {
+            err "User configuration failed"
+            return 1
+        }
+    fi
 
     msg "User configuration completed"
 }
@@ -1210,8 +1369,10 @@ sleep 2
 sync
 msg "All data synced to disk"
 
-# Ask user if they want to unmount
-ask_unmount
+# Ask user if they want to unmount (only for successful full installation)
+if [[ "$ANY_STEP_FLAG" != true ]]; then
+    ask_unmount
+fi
 
 msg "Arch Linux installation completed successfully!"
 msg "System features:"

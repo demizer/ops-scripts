@@ -16,6 +16,7 @@ PACKAGES=(
     aspell-en
     atuin
     aurutils
+    automountnfs
     bats
     binutils
     binwalk

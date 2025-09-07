@@ -2,6 +2,106 @@
 
 A collection of system administration and operational scripts for managing infrastructure, backups, and host configurations.
 
+## Configuring a New Host
+
+Complete workflow for creating a new host configuration (reminder for future use):
+
+### 1. Research Previous Host Setup
+
+```bash
+# Review git history to find the most recently created/updated host
+git log --oneline --name-only | grep "hosts/" | head -20
+```
+
+### 2. Copy Existing Host Configuration
+
+```bash
+# Copy files from the most similar existing host
+cp -r hosts/<existing-host> hosts/<new-host>
+```
+
+### 3. Update Device IDs
+
+Use Claude to update all device identifiers in the new host files:
+- Storage device paths (`/dev/disk/by-id/...`)
+- Partition references
+- Hardware-specific configurations
+
+### 4. Customize Configuration
+
+Review and update:
+- Partition scheme in `01_partition.sh`
+- Package installation list in `04_packages.sh`
+- Any host-specific settings
+
+### 5. Update Live ISO
+
+```bash
+# Copy updated scripts to live ISO environment
+sudo ./usb-tools/create-usb-tools.sh --device /dev/sdX --config-update
+```
+
+### 6. Boot and Setup Live Environment
+
+1. Boot from the ISO
+2. Connect to WiFi: `alvaone-wifi-setup`
+3. Start tmux session: `alvaone-session`
+
+### 7. Remote Installation (Optional)
+
+For comfortable installation from another location:
+```bash
+# SSH into the live environment and run installation in tmux
+ssh root@<live-ip>
+tmux attach-session -t main
+```
+
+### 8. Install and Test
+
+1. Run the full installation: `./archinstall.sh`
+2. Boot into the new system
+3. Test all functionality
+
+### 9. Iterative Development
+
+- Fix any boot issues using Claude
+- Update scripts as needed
+- May require multiple complete installations to perfect
+- Test sanity checks and all system features
+- It may take half a day and 10 full reinstalls to get everything right, but it's worth it because it won't need to be done again.
+
+When changes are needed:
+```bash
+# From development machine, sync changes to live environment
+TERM=xterm rsync -vrthP . root@192.168.5.128:/workspace/ --delete-after
+
+# Test installation scripts
+./archinstall.sh --mount --sanity  # or other specific steps
+```
+
+### 10. Finalize
+
+```bash
+# Commit all changes
+git add hosts/<new-host>/
+git commit -m "host: add new host <new-host>"
+git push
+
+# Update live ISO with final configuration
+sudo ./usb-tools/create-usb-tools.sh --device /dev/sdX --config-update
+
+```
+
+**IMPORTANT: REFLASH THE USB LIVE ENVIRONMENT WITH ANY UPDATES!!**
+
+Keep it fresh so when it is used again in six months it can be redeployed to a new usb key and work.
+
+Reflash and then boot into the live environment from the same system that was just configured and make sure the live environment still works!
+
+### 11. Documentation Complete
+
+The new host is ready for deployment and the live ISO contains the latest scripts.
+
 ## Quick Start - USB Tools System
 
 ### Complete USB Tools Workflow

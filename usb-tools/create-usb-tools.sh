@@ -617,6 +617,7 @@ configure_systemd() {
     arch-chroot "$MOUNT_ROOT" systemctl enable sshd
     arch-chroot "$MOUNT_ROOT" systemctl enable systemd-networkd
     arch-chroot "$MOUNT_ROOT" systemctl enable systemd-resolved
+    arch-chroot "$MOUNT_ROOT" systemctl enable iwd
 
     # Configure automatic wired network connection
     mkdir -p "$MOUNT_ROOT/etc/systemd/network"
@@ -630,6 +631,16 @@ IPv6AcceptRA=yes
 
 [DHCP]
 RouteMetric=10
+EOF
+
+    # Configure iwd
+    mkdir -p "$MOUNT_ROOT/etc/iwd"
+    cat > "$MOUNT_ROOT/etc/iwd/main.conf" << 'EOF'
+[General]
+EnableNetworkConfiguration=true
+
+[Network]
+NameResolvingService=systemd
 EOF
 
     msg2 "Systemd services and networking configured successfully"
@@ -728,7 +739,7 @@ configure_ssh_keys() {
 
     # Look for the specific SSH public key
     local ssh_pubkey="$HOME/.ssh/id_ed25519_alvaone_2025-09-06.pub"
-    
+
     if [[ -f "$ssh_pubkey" ]]; then
         msg2 "Found SSH public key at $ssh_pubkey"
         cp "$ssh_pubkey" "$MOUNT_ROOT/root/.ssh/authorized_keys"
@@ -813,7 +824,7 @@ title    Alvaone System Tools
 sort-key 01
 linux    /vmlinuz-linux
 initrd   /initramfs-linux.img
-options  root=LABEL=ARCHISO_ROOT rw quiet
+options  root=LABEL=ARCHISO_ROOT rw
 EOF
 
     # Fallback boot entry (verbose)
@@ -968,11 +979,13 @@ end
 if status is-interactive
     echo "Welcome to Alvaone System Tools"
     echo
-    echo "    Run 'setup-session' to start tmux with multiple windows"
+    echo "    Run 'alvaone-session' to start tmux with multiple windows"
+    echo "    Run 'alvaone-wifi-setup' to connect to WiFi"
     echo
     echo "Available tools:"
-    echo "  - ops-scripts: mount-nfs, tar-backup, rsync-backup, pvt.sh"
+    echo "  - ops-scripts: alvaone-mount-nfs, alvaone-tar-backup, alvaone-rsync-backup, alvaone-network-pvt"
     echo "  - Network diagnostics: nmap, iperf3, mtr, tcpdump, traceroute"
+    echo "  - Network setup: alvaone-wifi-setup (connect to WiFi)"
     echo "  - Disk recovery: ddrescue, testdisk, photorec, foremost"
     echo "  - System monitoring: htop, iotop, lsof, strace"
     echo "  - File management: mc, tree, ncdu"
@@ -1018,7 +1031,8 @@ echo "Username: root"
 echo "Password: alvaone"
 echo
 echo "Shell: Default is fish"
-echo "       Run 'setup-session' to start tmux with multiple windows"
+echo "       Run 'alvaone-session' to start tmux with multiple windows"
+echo "       Run 'alvaone-wifi-setup' to connect to WiFi"
 echo
 EOF
 
@@ -1031,8 +1045,8 @@ EOF
 setup_session_tools() {
     msg2 "Setting up session tools..."
 
-    # Create setup-session.fish script
-    cat > "$MOUNT_ROOT/usr/local/bin/setup-session.fish" << 'EOF'
+    # Create alvaone-session.fish script
+    cat > "$MOUNT_ROOT/usr/local/bin/alvaone-session.fish" << 'EOF'
 #!/usr/bin/env fish
 
 # Setup tmux session with multiple windows
@@ -1062,10 +1076,127 @@ else
 end
 EOF
 
-    chmod +x "$MOUNT_ROOT/usr/local/bin/setup-session.fish"
+    chmod +x "$MOUNT_ROOT/usr/local/bin/alvaone-session.fish"
 
-    # Create setup-session command symlink
-    ln -sf /usr/local/bin/setup-session.fish "$MOUNT_ROOT/usr/local/bin/setup-session"
+    # Create convenience symlinks
+    ln -sf /usr/local/bin/alvaone-session.fish "$MOUNT_ROOT/usr/local/bin/alvaone-session"
+    ln -sf /usr/local/bin/alvaone-session.fish "$MOUNT_ROOT/usr/local/bin/setup-session"
+
+    # Create alvaone-wifi-setup script
+    cat > "$MOUNT_ROOT/usr/local/bin/alvaone-wifi-setup" << 'EOF'
+#!/usr/bin/env bash
+
+# Alvaone WiFi Setup Script
+# Connects to alvaone-fast or alvaone networks using iwctl
+
+# Try to source lib.sh from common locations
+if [[ -f /workspace/lib.sh ]]; then
+    source /workspace/lib.sh
+elif [[ -f /usr/local/share/ops-scripts/lib.sh ]]; then
+    source /usr/local/share/ops-scripts/lib.sh
+else
+    # Fallback color functions if lib.sh not found
+    msg() { printf "\e[32m==>\e[0m %s\n" "$1"; }
+    warn() { printf "\e[33m==> WARNING:\e[0m %s\n" "$1"; }
+    err() { printf "\e[31m==> ERROR:\e[0m %s\n" "$1" >&2; }
+fi
+
+# Check if running as root
+if [[ "$(id -u)" != "0" ]]; then
+    err "This script must be run as root"
+    exit 1
+fi
+
+# Check if iwctl is available
+if ! command -v iwctl >/dev/null 2>&1; then
+    err "iwctl not found - ensure iwd is installed"
+    exit 1
+fi
+
+msg "Alvaone WiFi Setup"
+echo
+
+# Get available wireless devices
+msg "Scanning for wireless devices..."
+devices=$(iwctl device list | grep -E "^\s*\w+" | awk '{print $1}' | grep -v "Name")
+
+if [[ -z "$devices" ]]; then
+    err "No wireless devices found"
+    exit 1
+fi
+
+# Use first available device
+device=$(echo "$devices" | head -1)
+msg "Using wireless device: $device"
+
+# Power on the device
+msg "Powering on wireless device..."
+iwctl device "$device" set-property Powered on
+
+# Start scanning
+msg "Scanning for networks..."
+iwctl station "$device" scan
+sleep 3
+
+# Get available networks
+msg "Checking available networks..."
+networks=$(iwctl station "$device" get-networks | grep -E "(alvaone-fast|alvaone)" | awk '{print $1}')
+
+if [[ -z "$networks" ]]; then
+    err "Neither alvaone-fast nor alvaone networks found"
+    echo
+    msg "Available networks:"
+    iwctl station "$device" get-networks
+    exit 1
+fi
+
+# Determine which network to connect to (prefer alvaone-fast)
+target_network=""
+if echo "$networks" | grep -q "alvaone-fast"; then
+    target_network="alvaone-fast"
+elif echo "$networks" | grep -q "alvaone"; then
+    target_network="alvaone"
+fi
+
+if [[ -z "$target_network" ]]; then
+    err "Neither alvaone-fast nor alvaone networks available"
+    exit 1
+fi
+
+msg "Found network: $target_network"
+
+# Prompt for password
+echo
+read -s -p "Enter password for $target_network: " password
+echo
+
+if [[ -z "$password" ]]; then
+    err "Password cannot be empty"
+    exit 1
+fi
+
+# Connect to the network
+msg "Connecting to $target_network..."
+if iwctl --passphrase "$password" station "$device" connect "$target_network"; then
+    msg "Successfully connected to $target_network"
+
+    # Wait a moment and check connection status
+    sleep 2
+    msg "Connection status:"
+    iwctl station "$device" show
+
+    # Show IP information
+    echo
+    msg "Network configuration:"
+    ip addr show "$device" 2>/dev/null || ip addr show
+
+else
+    err "Failed to connect to $target_network"
+    exit 1
+fi
+EOF
+
+    chmod +x "$MOUNT_ROOT/usr/local/bin/alvaone-wifi-setup"
 
     msg2 "Session tools setup completed successfully"
 }
@@ -1173,10 +1304,12 @@ copy_ops_scripts() {
 
     # List of main tools to make available system-wide
     local tools_to_link=(
-        "usb-tools/mount-nfs.sh:mount-nfs"
-        "usb-tools/create-usb-tools.sh:create-usb-tools"
-        "backup/tar-backup.sh:tar-backup"
-        "usb-tools/test-usb-tools.sh:test-usb-tools"
+        "usb-tools/mount-nfs.sh:alvaone-mount-nfs"
+        "usb-tools/create-usb-tools.sh:alvaone-create-usb-tools"
+        "backup/tar-backup.sh:alvaone-tar-backup"
+        "backup/rsync-backup.sh:alvaone-rsync-backup"
+        "usb-tools/test-usb-tools.sh:alvaone-test-usb-tools"
+        "network/pvt.sh:alvaone-network-pvt"
     )
 
     for tool_mapping in "${tools_to_link[@]}"; do

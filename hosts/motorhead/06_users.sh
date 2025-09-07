@@ -77,7 +77,7 @@ if arch-chroot "$MOUNT_ROOT" id "$USERNAME" > /dev/null 2>&1; then
     }
 else
     msg "Creating user $USERNAME..."
-    
+
     # First ensure the primary group exists
     msg "Checking if group with GID $HOST_GID exists..."
     if ! arch-chroot "$MOUNT_ROOT" getent group "$HOST_GID" > /dev/null 2>&1; then
@@ -86,7 +86,7 @@ else
             warn "Failed to create primary group, will use default group creation"
         }
     fi
-    
+
     # Create user with same UID, GID, shell, and GECOS
     run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" useradd -u "$HOST_UID" -g "$HOST_GID" -m -s "$HOST_SHELL" -c "$HOST_GECOS" "$USERNAME" || {
         # If user creation fails (maybe due to UID conflict), create with default settings
@@ -120,10 +120,16 @@ for group in "${GROUP_ARRAY[@]}"; do
     fi
 done
 
-# Set password interactively
+# Set password using cached password from environment or interactively
 msg "Setting password for user $USERNAME..."
-msg "You will be prompted to enter a password for the $USERNAME user"
-run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" passwd "$USERNAME"
+if [[ -n "$USER_PASSWORD" ]]; then
+    echo "$USERNAME:$USER_PASSWORD" | arch-chroot "$MOUNT_ROOT" chpasswd || {
+        err "Failed to set password for user $USERNAME"
+    }
+else
+    msg "You will be prompted to enter a password for the $USERNAME user"
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" passwd "$USERNAME"
+fi
 
 # Set ownership of home directory
 # Use numeric UID:GID since group name might not match username

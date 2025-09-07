@@ -30,6 +30,7 @@ CHECKS PERFORMED:
     - /etc/fstab is correct with EFI partition
     - EFI partition contains initramfs files
     - Root filesystem structure is complete
+    - Hostname configuration (FQDN, /etc/hostname, /etc/hosts)
 
 EXAMPLES:
     $0
@@ -234,7 +235,141 @@ else
     check_result "User 'jesusa' exists" "false" "User not found"
 fi
 
-# Check 9: Skip NVIDIA configuration (not used on motorhead)
+# Check 9: Hostname configuration
+msg "Checking hostname configuration..."
+expected_fqdn="motorhead.alvaone.net"
+if arch-chroot "$MOUNT_ROOT" hostname | grep -q "^$expected_fqdn$"; then
+    check_result "Hostname FQDN is set correctly" "true" "$(arch-chroot "$MOUNT_ROOT" hostname)"
+else
+    actual_hostname=$(arch-chroot "$MOUNT_ROOT" hostname 2> /dev/null || echo "unknown")
+    check_result "Hostname FQDN is set correctly" "false" "Expected: $expected_fqdn, Actual: $actual_hostname"
+fi
+
+# Check hostname file
+if [[ -f "$MOUNT_ROOT/etc/hostname" ]]; then
+    hostname_file_content=$(cat "$MOUNT_ROOT/etc/hostname" | tr -d '\n')
+    if [[ "$hostname_file_content" == "motorhead" ]]; then
+        check_result "/etc/hostname contains correct short hostname" "true" "$hostname_file_content"
+    else
+        check_result "/etc/hostname contains correct short hostname" "false" "Expected: motorhead, Actual: $hostname_file_content"
+    fi
+else
+    check_result "/etc/hostname file exists" "false" "File not found"
+fi
+
+# Check /etc/hosts configuration
+if [[ -f "$MOUNT_ROOT/etc/hosts" ]]; then
+    if grep -q "127.0.1.1.*motorhead.alvaone.net.*motorhead" "$MOUNT_ROOT/etc/hosts"; then
+        hosts_entry=$(grep "127.0.1.1" "$MOUNT_ROOT/etc/hosts")
+        check_result "/etc/hosts has correct FQDN entry" "true" "$hosts_entry"
+    else
+        check_result "/etc/hosts has correct FQDN entry" "false" "FQDN entry not found or incorrect"
+    fi
+else
+    check_result "/etc/hosts file exists" "false" "File not found"
+fi
+
+# Check 10: Validate fstab contains only expected target devices
+msg "Checking fstab contains only expected target devices..."
+if [[ -f "$fstab_file" ]]; then
+    # Get target device name (e.g., nvme0n1 from /dev/disk/by-id/nvme-...)
+    target_device_path=$(readlink -f "$DEVICE_ROOT" 2> /dev/null || echo "$DEVICE_ROOT")
+    target_device_name=$(basename "$target_device_path")
+    invalid_devices=()
+    found_partitions=()
+
+    # Parse fstab and validate each device
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// /}" ]] && continue
+
+        # Parse fstab entry
+        device=$(echo "$line" | awk '{print $1}')
+        mountpoint=$(echo "$line" | awk '{print $2}')
+        fstype=$(echo "$line" | awk '{print $3}')
+
+        # Skip special filesystems that don't need device validation
+        case "$fstype" in
+            proc | sysfs | devpts | tmpfs | devtmpfs) continue ;;
+        esac
+
+        # Check if this is an expected device
+        device_valid=false
+        target_partition=""
+
+        if [[ "$device" =~ ^UUID= ]]; then
+            uuid=${device#UUID=}
+            # Check if this UUID belongs to our target device by looking up the device name
+            uuid_device=$(readlink -f "/dev/disk/by-uuid/$uuid" 2> /dev/null)
+            if [[ -n "$uuid_device" ]]; then
+                uuid_device_name=$(basename "$uuid_device")
+                # Check if it's one of our target device partitions (e.g., nvme0n1p1-5)
+                if [[ "$uuid_device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                    device_valid=true
+                    target_partition="$uuid_device_name"
+                    found_partitions+=("$target_partition")
+                    msg "✅ Validated target partition $target_partition ($device -> $mountpoint, $fstype)"
+                fi
+            fi
+        elif [[ "$device" =~ : ]]; then
+            # NFS mount - these are allowed
+            device_valid=true
+            msg "✅ Validated NFS mount ($device -> $mountpoint, $fstype)"
+        elif [[ "$device" =~ ^/dev/ ]]; then
+            # Check if this is one of our target device partitions
+            device_name=$(basename "$device")
+            if [[ "$device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                device_valid=true
+                target_partition="$device_name"
+                found_partitions+=("$target_partition")
+                msg "✅ Validated target partition $target_partition ($device -> $mountpoint, $fstype)"
+            fi
+        fi
+
+        # If device is not valid, it's likely an archiso or other external device
+        if [[ "$device_valid" == "false" ]]; then
+            invalid_devices+=("$device ($mountpoint, $fstype)")
+            if [[ "$fstype" == "swap" ]] || [[ "$mountpoint" == "/swapfile" ]]; then
+                warn "⚠️  CRITICAL: Invalid swap device $device - this is likely archiso swap that WILL cause boot failure!"
+            else
+                warn "⚠️  WARNING: Invalid device $device - not from target system partitions"
+            fi
+        fi
+    done < "$fstab_file"
+
+    # Check if all expected partitions are present in fstab
+    expected_partitions=("${target_device_name}p1" "${target_device_name}p2" "${target_device_name}p3" "${target_device_name}p4" "${target_device_name}p5")
+    missing_partitions=()
+    for expected in "${expected_partitions[@]}"; do
+        partition_found=false
+        for found in "${found_partitions[@]}"; do
+            if [[ "$found" == "$expected" ]]; then
+                partition_found=true
+                break
+            fi
+        done
+        if [[ "$partition_found" == "false" ]]; then
+            missing_partitions+=("$expected")
+        fi
+    done
+
+    # Report results
+    if [[ ${#invalid_devices[@]} -eq 0 ]] && [[ ${#missing_partitions[@]} -eq 0 ]]; then
+        check_result "fstab contains only target system devices" "true" "All target partitions accounted for and no invalid devices"
+    else
+        error_details=""
+        if [[ ${#invalid_devices[@]} -gt 0 ]]; then
+            error_details+="Invalid devices: ${invalid_devices[*]} "
+        fi
+        if [[ ${#missing_partitions[@]} -gt 0 ]]; then
+            error_details+="Missing partitions: ${missing_partitions[*]}"
+        fi
+        check_result "fstab contains only target system devices" "false" "$error_details"
+    fi
+else
+    check_result "fstab file exists" "false" "No fstab file found"
+fi
 
 # Summary
 echo
@@ -249,7 +384,7 @@ if [[ $FAILED_CHECKS -eq 0 ]]; then
     exit 0
 else
     warn "❌ $FAILED_CHECKS sanity check(s) failed!"
-    warn "The system may not boot properly or may not boot into GDM."
+    warn "The system may not boot properly."
     warn "Review the failed checks above and fix the issues before rebooting."
     exit 1
 fi
