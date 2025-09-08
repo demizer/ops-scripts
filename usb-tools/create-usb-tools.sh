@@ -584,8 +584,84 @@ fi
 configure_base_system() {
     msg2 "Configuring base system..."
 
-    # Generate fstab
-    genfstab -U "$MOUNT_ROOT" >> "$MOUNT_ROOT/etc/fstab" || {
+    # Generate fstab with header comments
+    cat > "$MOUNT_ROOT/etc/fstab" << 'EOF'
+# Static information about the filesystems.
+# See fstab(5) for details.
+
+# <file system> <dir> <type> <options> <dump> <pass>
+EOF
+
+    # Generate fstab entries and filter out non-target devices
+    # Get the target device name to only include partitions from our target device
+    target_device_path=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
+    target_device_name=$(basename "$target_device_path")
+
+    # Generate raw fstab and filter to only include target device partitions
+    genfstab -U "$MOUNT_ROOT" | while IFS= read -r line; do
+        # Handle comments - filter out comments for non-target devices
+        if [[ "$line" =~ ^[[:space:]]*# ]]; then
+            # Check if this comment references a non-target device
+            if [[ "$line" =~ /dev/[^[:space:]]+ ]]; then
+                comment_device=$(echo "$line" | grep -o '/dev/[^[:space:]]*')
+                comment_device_name=$(basename "$comment_device")
+                # Only include comments for our target device partitions
+                if [[ "$comment_device_name" =~ ^${target_device_name}p?[1-5]$ ]]; then
+                    echo "$line"
+                fi
+                # Skip comments for non-target devices (archiso, etc.)
+            else
+                # Include non-device comments (headers, etc.)
+                echo "$line"
+            fi
+            continue
+        fi
+
+        # Skip empty lines - pass them through
+        if [[ -z "${line// /}" ]]; then
+            echo "$line"
+            continue
+        fi
+
+        # Parse fstab entry
+        device=$(echo "$line" | awk '{print $1}')
+        mountpoint=$(echo "$line" | awk '{print $2}')
+        fstype=$(echo "$line" | awk '{print $3}')
+
+        # Skip special filesystems - pass them through
+        case "$fstype" in
+            proc | sysfs | devpts | tmpfs | devtmpfs)
+                echo "$line"
+                continue
+                ;;
+        esac
+
+        # Check if this device belongs to our target device
+        include_device=false
+        if [[ "$device" =~ ^UUID= ]]; then
+            uuid=${device#UUID=}
+            # Look up the actual device for this UUID
+            uuid_device=$(readlink -f "/dev/disk/by-uuid/$uuid" 2> /dev/null)
+            if [[ -n "$uuid_device" ]]; then
+                uuid_device_name=$(basename "$uuid_device")
+                # Only include if it's from our target device (e.g., sdb1-3, nvme0n1p1-3, mmcblk0p1-3)
+                if [[ "$uuid_device_name" =~ ^${target_device_name}p?[1-5]$ ]]; then
+                    include_device=true
+                fi
+            fi
+        elif [[ "$device" =~ ^/dev/ ]]; then
+            device_name=$(basename "$device")
+            # Only include if it's from our target device
+            if [[ "$device_name" =~ ^${target_device_name}p?[1-5]$ ]]; then
+                include_device=true
+            fi
+        fi
+
+        # Include the device if it passed validation
+        if [[ "$include_device" == "true" ]]; then
+            echo "$line"
+        fi
+    done >> "$MOUNT_ROOT/etc/fstab" || {
         error "Failed to generate fstab"
         return 1
     }
@@ -603,8 +679,8 @@ configure_base_system() {
     # Generate locale
     arch-chroot "$MOUNT_ROOT" locale-gen
 
-    # Configure dvorak keymap
-    echo "KEYMAP=dvorak" > "$MOUNT_ROOT/etc/vconsole.conf"
+    # Configure default keymap (users can change in session)
+    echo "KEYMAP=us" > "$MOUNT_ROOT/etc/vconsole.conf"
 
     # Set root password to 'alvaone'
     echo 'root:alvaone' | arch-chroot "$MOUNT_ROOT" chpasswd
@@ -1051,6 +1127,12 @@ setup_session_tools() {
 # Setup tmux session with multiple windows
 if command -v tmux >/dev/null 2>&1
     set SESSION_NAME "main"
+
+    # Set dvorak keymap for this session
+    if command -v loadkeys >/dev/null 2>&1
+        echo "Setting dvorak keymap for session..."
+        loadkeys dvorak
+    end
 
     # Create session if it doesn't exist
     if not tmux has-session -t "$SESSION_NAME" 2>/dev/null
