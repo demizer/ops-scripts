@@ -1033,10 +1033,6 @@ echo "Network: SSH daemon is enabled and running"
 echo "Username: root"
 echo "Password: alvaone"
 echo
-echo "Shell: Default is fish"
-echo "       Run 'alvaone-session' to start tmux with multiple windows"
-echo "       Run 'alvaone-wifi-setup' to connect to WiFi"
-echo
 EOF
 
     chmod +x "$MOUNT_ROOT/root/motd.sh"
