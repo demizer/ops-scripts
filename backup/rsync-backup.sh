@@ -16,7 +16,6 @@ excludes=(
     "/var/spool/*"
     "/run/*"
     "*/lost+found"
-    # "/home"
     "/home/*/.thumbnails"
     "/home/*/.gvfs"
     "/home/*/**/Trash/*"
@@ -26,6 +25,8 @@ excludes=(
     "/home/*/.netflix*"
     "/home/*/.dbus"
     "/home/*/.cargo"
+
+    # "/home"
     # "/home/*/.steam"
     # "/home/*/.local/share/Steam"
 )
