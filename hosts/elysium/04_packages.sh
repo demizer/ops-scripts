@@ -1,0 +1,277 @@
+#!/bin/bash
+
+# Package installer for elysium
+# Simple package installation - no error recovery
+
+# Check if running on Arch Linux
+if [[ ! -f /etc/arch-release ]]; then
+    echo "This script must be run on Arch Linux"
+    exit 1
+fi
+
+# Packages explicitly installed on motorhead host
+PACKAGES=(
+    7zip
+    asciiquarium
+    aspell-en
+    atuin
+    aurutils
+    automountnfs
+    baobab
+    base
+    base-devel
+    bats
+    binutils
+    binwalk
+    bluez-utils
+    bridge-utils
+    btrfs-progs
+    chatty
+    chromium
+    claude-code
+    codespell
+    cups
+    d-spy
+    davinci-resolve-studio
+    dconf-editor
+    decibels
+    devhelp
+    devtools
+    docker
+    docker-buildx
+    docker-compose
+    dosfstools
+    dust-git
+    e2fsprogs
+    efibootmgr
+    endeavour
+    eog
+    epiphany
+    evince
+    eza
+    fatresize
+    file-roller
+    filezilla
+    firefox
+    fish
+    freecad-git
+    fwupd
+    fzf
+    game-devices-udev
+    gamescope-nvidia
+    gdm
+    ghex
+    gimp
+    git
+    gnome
+    gnome-backgrounds
+    gnome-boxes
+    gnome-browser-connector
+    gnome-builder
+    gnome-calculator
+    gnome-calendar
+    gnome-calls
+    gnome-characters
+    gnome-chess
+    gnome-circle
+    gnome-clocks
+    gnome-color-manager
+    gnome-connections
+    gnome-console
+    gnome-contacts
+    gnome-control-center
+    gnome-disk-utility
+    gnome-extra
+    gnome-font-viewer
+    gnome-keyring
+    gnome-logs
+    gnome-mahjongg
+    gnome-maps
+    gnome-menus
+    gnome-mines
+    gnome-music
+    gnome-nibbles
+    gnome-remote-desktop
+    gnome-robots
+    gnome-session
+    gnome-settings-daemon
+    gnome-shell
+    gnome-shell-extension-pop-shell-git
+    gnome-software
+    gnome-sound-recorder
+    gnome-sudoku
+    gnome-system-monitor
+    gnome-text-editor
+    gnome-tour
+    gnome-tweaks
+    gnome-user-docs
+    gnome-user-share
+    gnome-weather
+    go
+    gptfdisk
+    grilo-plugins
+    grub
+    gst-libav
+    gst-plugins-ugly
+    gvfs
+    gvfs-afc
+    gvfs-dnssd
+    gvfs-goa
+    gvfs-google
+    gvfs-gphoto2
+    gvfs-mtp
+    gvfs-nfs
+    gvfs-onedrive
+    gvfs-smb
+    gvfs-wsdd
+    handbrake
+    hexedit
+    htop
+    inetutils
+    joyutils
+    jq
+    just
+    kitty
+    lazygit
+    less
+    libfido2
+    librecad
+    libreoffice-fresh
+    libva-utils
+    libva-vdpau-driver-vp9-git
+    libxcrypt-compat
+    lightsoff
+    linux-firmware
+    linux-zen
+    linux-zen-headers
+    localsearch
+    loupe
+    lshw
+    lua-language-server
+    luacheck
+    lvm2
+    m4
+    make
+    malcontent
+    man-db
+    man-pages
+    memtest86+
+    minicom
+    mtr
+    mutter
+    nautilus
+    neovim
+    net-tools
+    networkmanager
+    networkmanager-openvpn
+    nfs-utils
+    ngrep
+    nmap
+    noto-fonts
+    noto-fonts-cjk
+    noto-fonts-extra
+    npm
+    ntfs-3g
+    ntp
+    nvidia-open-dkms
+    obsidian
+    openbsd-netcat
+    openssh
+    orca
+    orca-slicer-bin
+    pacman-contrib
+    pacnews-neovim
+    pam-u2f
+    pandoc-cli
+    parted
+    patch
+    pixz
+    pkgconf
+    postgresql
+    postman-bin
+    powerline-fonts
+    pv
+    pyright
+    python
+    python-jaraco.classes
+    python-pip
+    python-pipx
+    qmk
+    qt6-wayland
+    quadrapassel
+    quicklisp
+    raylib
+    reflector
+    remmina
+    ripgrep
+    rsync
+    rygel
+    samba
+    sbcl
+    scdoc
+    sdl2_mixer
+    sdl2_ttf
+    shellcheck
+    simple-scan
+    snapshot
+    solaar
+    spacenavd
+    spnavcfg
+    steam
+    strace
+    sudo
+    sushi
+    swell-foop
+    switcheroo-control
+    syncthing
+    syslinux
+    sysprof
+    tecla
+    texinfo
+    thermald
+    tinysparql
+    tk
+    tmux
+    totem
+    tree
+    tree-sitter-cli
+    ttf-atkinson-hyperlegible
+    ttf-dejavu
+    ttf-droid
+    ttf-font-awesome
+    ttf-inconsolata
+    ttf-liberation
+    ttf-mac-fonts
+    ttf-ms-fonts
+    ttf-nerd-fonts-symbols
+    unzip
+    updpkgsrcs
+    usbutils
+    uv
+    vifm
+    vlc
+    vulkan-tools
+    wget
+    wireguard-tools
+    wl-clipboard
+    xdg-desktop-portal-gnome
+    xdg-user-dirs-gtk
+    yelp
+)
+
+echo "Installing ${#PACKAGES[@]} packages..."
+
+# Update package database
+echo "Updating package database..."
+if ! pacman -Sy --noconfirm; then
+    echo "Failed to update package database" >&2
+    exit 1
+fi
+
+# Install all packages at once - let pacman handle dependencies and conflicts
+if pacman -S --needed --noconfirm "${PACKAGES[@]}"; then
+    echo "Package installation completed successfully"
+else
+    echo "Package installation failed" >&2
+    exit 1
+fi
