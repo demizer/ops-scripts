@@ -137,6 +137,7 @@ PACKAGES=(
     screen tmux
     tree mc
     ncdu
+    pixz
 
     # Tools needed by ops-scripts and self-reproduction
     arch-install-scripts # pacstrap, genfstab, arch-chroot
