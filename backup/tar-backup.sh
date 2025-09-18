@@ -16,11 +16,35 @@ DEFAULT_SOURCE_PATH="/"
 # Keep only the last N backups
 if [[ -n "$CUSTOM_KEEP" ]]; then
     REFRESH="$CUSTOM_KEEP"
-elif [[ $HOSTNAME == "lithium" ]]; then
-    REFRESH=6
 else
-    REFRESH=4
+    REFRESH=10
 fi
+
+# Default exclusion patterns
+EXCLUDE_PATTERNS=(
+    # "/opt"
+    # "/usr/*"
+    "/proc/*"
+    "/sys/*"
+    "/mnt/*"
+    "/media/*"
+    "/dev/*"
+    "/tmp/*"
+    "/data/*"
+    "/var/tmp/*"
+    "/var/abs/*"
+    "/run/*"
+    "*/lost+found"
+    "/home/*/.thumbnails"
+    "/home/*/.gvfs"
+    "/home/*/**/Trash/*"
+    "/home/*/.npm"
+    "/home/*/.[cC]*ache"
+    "/home/*/**/*Cache*"
+    "/home/*/.netflix*"
+    "/home/*/.dbus"
+    "/home/*/.cargo"
+)
 
 # check if messages are to be printed using color
 unset ALL_OFF BOLD BLUE GREEN RED YELLOW
@@ -91,33 +115,47 @@ send_email() {
     if [[ $3 == "" ]]; then
         echo -e "${1}" | mail -s "${2}" "${EMAIL}" &> /dev/null
     else
-        echo -e "${1}" | uuencode "${3}" "$(basename "${3}")" | mail -s "${2}" "${EMAIL}" &> /dev/null
+        # Use mail with attachment flag if available, otherwise fall back to inline base64
+        if command -v mail >/dev/null 2>&1 && mail --help 2>&1 | grep -q "\-a"; then
+            echo -e "${1}" | mail -s "${2}" -a "${3}" "${EMAIL}" &> /dev/null
+        else
+            {
+                echo -e "${1}"
+                echo ""
+                echo "=== Attachment: $(basename "${3}") ==="
+                base64 "${3}"
+            } | mail -s "${2}" "${EMAIL}" &> /dev/null
+        fi
     fi
 }
 
 # Function to show help
 show_help() {
     cat << EOF
-Usage: $0 [OPTIONS] [SOURCE_PATH] [DEST_DIR]
+Usage: $0 [OPTIONS] [SOURCE_PATH] [DEST_DIR_OR_FILE]
 
 Create compressed tar backup with progress display
 
 ARGUMENTS:
-    SOURCE_PATH     Path to backup (default: /)
-    DEST_DIR        Directory where backup will be created (default: /mnt/backups)
+    SOURCE_PATH         Path to backup (default: /)
+    DEST_DIR_OR_FILE    Directory where backup will be created (default: /mnt/backups)
+                        OR full path to .tpxz file
 
 OPTIONS:
-    -h, --help      Show this help message
+    -h              Show this help message
+    --help          Show this help message with exclusions list
     -e, --email     Email address for notifications (default: nas@alva.rez.codes)
-    -k, --keep      Number of old backups to keep (default: 4 or 6 for lithium)
+    -k, --keep      Number of old backups to keep (default: 10)
     --no-email      Disable email notifications
     --no-cleanup    Don't remove old backups
+    --excludes      Show default exclusion patterns
 
 EXAMPLES:
-    $0                              # Backup / to /mnt/backups
-    $0 /home /backup/home           # Backup /home to /backup/home
-    $0 --no-email /data /backup    # Backup /data to /backup without email
-    $0 -k 10 /opt /mnt/backups     # Keep 10 old backups
+    $0                                     # Backup / to /mnt/backups (Backup will be saved to /mnt/backups/hostname)
+    $0 /home /backup/home                  # Backup /home to /backup/home (Backup will be saved to /backup/home/hostname)
+    $0 /source /mnt/backups/destfile.tpxz  # Backup /source to exact file
+    $0 --no-email /data /backup            # Backup /data to /backup without email
+    $0 -k 10 /opt /mnt/backups             # Keep 10 old backups
 
 EOF
 }
@@ -131,8 +169,14 @@ CUSTOM_KEEP=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h | --help)
+        -h)
             show_help
+            exit 0
+            ;;
+        --help)
+            show_help
+            echo "DEFAULT EXCLUSION PATTERNS:"
+            printf "  * %s\n" "${EXCLUDE_PATTERNS[@]}"
             exit 0
             ;;
         -e | --email)
@@ -150,6 +194,11 @@ while [[ $# -gt 0 ]]; do
         --no-cleanup)
             CLEANUP_BACKUPS=false
             shift
+            ;;
+        --excludes)
+            echo "Default exclusion patterns:"
+            printf "  * %s\n" "${EXCLUDE_PATTERNS[@]}"
+            exit 0
             ;;
         -*)
             error "Unknown option: $1"
@@ -183,6 +232,13 @@ if [[ "$(id -u)" != "0" ]]; then
     exit 1
 fi
 
+# Check if pixz is available
+if ! command -v pixz &> /dev/null; then
+    error "pixz is not installed or not in PATH"
+    msg2 "Please install pixz package for parallel XZ compression"
+    exit 1
+fi
+
 # Make sure the raid pool is mounted if on lithium
 if [[ $HOSTNAME == "lithium" ]]; then
     MOUNT=$(mount | grep /mnt/data)
@@ -198,8 +254,17 @@ if [[ $HOSTNAME == "lithium" ]]; then
     fi
 fi
 
-# Create backup directory with hostname subdirectory
-BACKUP_DIR="${BACKUP_DIR%/}/$HOSTNAME"
+# Check if BACKUP_DIR is actually a .tpxz file path
+if [[ "$BACKUP_DIR" == *.tpxz ]]; then
+    # Extract directory and filename
+    DEST_FILE="$BACKUP_DIR"
+    BACKUP_DIR="$(dirname "$BACKUP_DIR")"
+    USE_CUSTOM_FILENAME=true
+else
+    # Create backup directory with hostname subdirectory (original behavior)
+    BACKUP_DIR="${BACKUP_DIR%/}/$HOSTNAME"
+    USE_CUSTOM_FILENAME=false
+fi
 
 # Check for backup directory
 if [[ ! -e ${BACKUP_DIR} ]]; then
@@ -210,14 +275,21 @@ else
     msg "Backing up to: "${BACKUP_DIR}
 fi
 
-# Built-in exclusion patterns
-EXCLUDES="--exclude=/opt --exclude=/proc/* --exclude=/sys/* --exclude=/mnt/* --exclude=/media/* --exclude=/dev/* --exclude=/tmp/* --exclude=/data/* --exclude=/var/tmp/* --exclude=/var/abs/* --exclude=/run/* --exclude=/usr/* --exclude=*/lost+found --exclude=/home/*/.thumbnails --exclude=/home/*/.gvfs --exclude=/home/*/**/Trash/* --exclude=/home/*/.npm --exclude=/home/*/.[cC]*ache --exclude=/home/*/**/*Cache* --exclude=/home/*/.netflix* --exclude=/home/*/.dbus --exclude=/home/*/.cargo"
+# Build exclusion flags from array
+EXCLUDES=""
+for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+    EXCLUDES="$EXCLUDES --exclude=$pattern"
+done
 msg "Using built-in exclusion patterns"
 
-FILENAME=$(echo $HOSTNAME)_backup_$(uname -r)_$(date +%m%d%Y).tar.xz
+if [[ "$USE_CUSTOM_FILENAME" == true ]]; then
+    FILENAME="$(basename "$DEST_FILE")"
+else
+    FILENAME=$(echo $HOSTNAME)_backup_$(uname -r)_$(date +%m%d%Y).tpxz
+fi
 
-# Remove old backups if cleanup is enabled
-if [[ "$CLEANUP_BACKUPS" == true ]]; then
+# Remove old backups if cleanup is enabled and not using custom filename
+if [[ "$CLEANUP_BACKUPS" == true && "$USE_CUSTOM_FILENAME" != true ]]; then
     cd "${BACKUP_DIR}"
     count=$(\ls -tr | wc -l)
     if [[ $count -gt $REFRESH ]]; then
@@ -230,12 +302,15 @@ if [[ "$CLEANUP_BACKUPS" == true ]]; then
     fi
 fi
 
-cat /dev/null > /root/backuplog.txt
-cat /dev/null > /root/backuplog-error.txt
+TEMP_DIR=$(mktemp -d)
+BACKUP_LOG="${TEMP_DIR}/backuplog.txt"
+BACKUP_ERROR_LOG="${TEMP_DIR}/backuplog-error.txt"
+cat /dev/null > "$BACKUP_LOG"
+cat /dev/null > "$BACKUP_ERROR_LOG"
 
 CALC="Calculating backup file list size... "
 msgr "${CALC}"
-(tar ${EXCLUDES} -cvpPf /dev/null "$SOURCE_PATH" > /tmp/logsize) &
+(tar ${EXCLUDES} -cvpPf /dev/null "$SOURCE_PATH" > /tmp/logsize 2> /dev/null) &
 PID1=$!
 
 while [[ $(ps -p $PID1 -o pid=) ]]; do
@@ -251,8 +326,9 @@ FIN_SIZE=$(du /tmp/logsize | cut -f 1)
 BACKM="Performing backup... "
 msgr "${BACKM}"
 BACKUP_START_TIME=$(date +%s)
-(tar --xz ${EXCLUDES} -cvpPf ${BACKUP_DIR}/${FILENAME} "$SOURCE_PATH" \
-    2> /root/backuplog-error.txt > /root/backuplog.txt) &
+
+tar ${EXCLUDES} -Ipixz -cvpPf ${BACKUP_DIR}/${FILENAME} "$SOURCE_PATH" 2>"$BACKUP_ERROR_LOG" 1>"$BACKUP_LOG" &
+
 PID2=$!
 
 PREV_SIZE=0
@@ -269,8 +345,8 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
     SPINNER_INDEX=$(((SPINNER_INDEX + 1) % 4))
 
     # Count files processed (lines in log)
-    if [[ -f "/root/backuplog.txt" ]]; then
-        FILE_COUNT=$(wc -l < "/root/backuplog.txt" 2> /dev/null || echo 0)
+    if [[ -f "$BACKUP_LOG" ]]; then
+        FILE_COUNT=$(wc -l < "$BACKUP_LOG" 2> /dev/null || echo 0)
     else
         FILE_COUNT=0
     fi
@@ -292,8 +368,12 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
         fi
 
         # Calculate percentage based on log file size
-        LOG_SIZE=$(du /root/backuplog.txt | cut -f 1)
-        PERC=$((${LOG_SIZE} * 100 / ${FIN_SIZE}))
+        LOG_SIZE=$(du "$BACKUP_LOG" | cut -f 1)
+        if [[ ${FIN_SIZE} -gt 0 ]]; then
+            PERC=$((${LOG_SIZE} * 100 / ${FIN_SIZE}))
+        else
+            PERC=0
+        fi
         FPERC=$(printf "%2d" ${PERC})
 
         # Create progress bar (20 chars wide)
@@ -307,10 +387,18 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
             PROGRESS_BAR+=" "
         done
 
-        printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${BACKUP_SIZE_MB}MB ${SPEED_MBS}MB/s ${SPINNER_CHAR}${ALL_OFF}" >&2
+        if [[ $BACKUP_SIZE_MB -gt 0 ]]; then
+            printf "\r\033[K${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${BACKUP_SIZE_MB}MB ${SPEED_MBS}MB/s ${SPINNER_CHAR}${ALL_OFF}" >&2
+        else
+            printf "\r\033[K${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files${ALL_OFF}" >&2
+        fi
     else
-        LOG_SIZE=$(du /root/backuplog.txt | cut -f 1)
-        PERC=$((${LOG_SIZE} * 100 / ${FIN_SIZE}))
+        LOG_SIZE=$(du "$BACKUP_LOG" | cut -f 1)
+        if [[ ${FIN_SIZE} -gt 0 ]]; then
+            PERC=$((${LOG_SIZE} * 100 / ${FIN_SIZE}))
+        else
+            PERC=0
+        fi
         FPERC=$(printf "%2d" ${PERC})
 
         # Create progress bar (20 chars wide)
@@ -324,16 +412,18 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
             PROGRESS_BAR+=" "
         done
 
-        printf "\r${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${SPINNER_CHAR}${ALL_OFF}" >&2
+        printf "\r\033[K${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${SPINNER_CHAR}${ALL_OFF}" >&2
     fi
 done
 echo
+
+exit 1
 
 wait $PID2
 TAR_EXIT_CODE=$?
 TAR_FILE_SIZE=$(du -h "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
 
-cd /root
+cd "$TEMP_DIR"
 
 msg2 "Compressing backuplog.txt..."
 if [[ -f backuplog.zip ]]; then
@@ -347,7 +437,7 @@ if [[ $TAR_EXIT_CODE > 1 ]]; then
         msg2 "Sending log to ${EMAIL}..."
         send_email "A problem occurred during backup.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
 ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-            "$HOSTNAME Backup FAILED" backuplog.zip
+            "$HOSTNAME Backup FAILED" "${TEMP_DIR}/backuplog.zip"
         msg2 "Done"
     fi
 else
@@ -356,7 +446,7 @@ else
         msg2 "Sending log to ${EMAIL}..."
         send_email "Backup completed successfully.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
 ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-            "$HOSTNAME Backup SUCCESSFUL" backuplog.zip
+            "$HOSTNAME Backup SUCCESSFUL" "${TEMP_DIR}/backuplog.zip"
         msg2 "Done"
     fi
 fi
