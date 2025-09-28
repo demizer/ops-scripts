@@ -1,0 +1,12 @@
+[distutils]
+index-servers = staging
+
+[testpypi]
+repository = https://test.pypi.org/legacy/
+username = __token__
+password = pypi-AgENdGVzdC5weXBpLm9yZwIkNWZiZTExODgtN2RiMi00N2Y0LWFjYTktYmU1M2I3NjNiNDhiAAIleyJwZXJtaXNzaW9ucyI6ICJ1c2VyIiwgInZlcnNpb24iOiAxfQAABiDd6_r17nyKYW1beeBX8bBzq6IMVUW23wbb34sD6H6DuA
+
+# [staging]
+# repository: https://urm.nvidia.com/artifactory/api/pypi/sw-gpu-cuda-installer-pypi-local
+# username: jesusa
+# password: Ma1212#$

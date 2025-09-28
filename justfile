@@ -1,7 +1,7 @@
 # Justfile for ops-scripts repository
 # Requires: uv (https://github.com/astral-sh/uv)
 
-# Default target
+# Default target - show available tasks
 default:
     @just --list
 
@@ -51,3 +51,23 @@ fix-scripts:
 # Comprehensive check for the repository
 full-audit: audit fix-scripts
     @echo "Full audit completed!"
+
+# ============================================================================
+# Dotfiles Management
+# ============================================================================
+
+# Install dotfiles using setup-dotfiles.lua
+dotfiles-install:
+    nvim -l setup-dotfiles.lua
+
+# Dry run dotfiles installation (preview changes without applying)
+dotfiles-preview:
+    nvim -l setup-dotfiles.lua -n
+
+# Install dotfiles with debug output
+dotfiles-debug:
+    nvim -l setup-dotfiles.lua -d
+
+# Show help for dotfiles setup script
+dotfiles-help:
+    nvim -l setup-dotfiles.lua -h

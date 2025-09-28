@@ -471,10 +471,112 @@ local keymaps_spec = {
     { "<leader>dp", "<cmd>'<,'>diffput<cr>", desc = "put",                                             mode = { "v" } },
 }
 
+-- Self-installation logic
+local function install_config()
+    local config_path = vim.fn.expand("~/.config/nvim")
+    local current_file = debug.getinfo(1, "S").source:sub(2)
+    
+    -- Create config directory if it doesn't exist
+    if vim.fn.isdirectory(config_path) == 0 then
+        vim.fn.mkdir(config_path, "p")
+    end
+    
+    -- Copy this file to init.lua if we're not already there
+    local init_lua = config_path .. "/init.lua"
+    if current_file ~= init_lua then
+        local content = vim.fn.readfile(current_file)
+        vim.fn.writefile(content, init_lua)
+        print("Configuration installed to " .. init_lua)
+        print("Please restart Neovim to use the installed configuration")
+        return true
+    end
+    
+    return false
+end
+
+-- Install if needed
+if install_config() then
+    return
+end
+
 vim.g.mapleader = " "
 
-vim.env.LAZY_STDPATH = ".nvim"
-load(vim.fn.system("curl -s https://raw.githubusercontent.com/folke/lazy.nvim/main/bootstrap.lua"))()
+-- Set up lazy.nvim with proper paths
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+if not vim.loop.fs_stat(lazypath) then
+    vim.fn.system({
+        "git",
+        "clone",
+        "--filter=blob:none",
+        "https://github.com/folke/lazy.nvim.git",
+        "--branch=stable",
+        lazypath,
+    })
+end
+vim.opt.rtp:prepend(lazypath)
+
+-- Check for lazy-lock.json file for dependency locking
+local function check_lockfile()
+    local lockfile_paths = {
+        vim.fn.expand("~/.config/nvim/lazy-lock.json"),
+        "/mnt/backups/ops-scripts/lazy-lock.json"
+    }
+
+    for _, path in ipairs(lockfile_paths) do
+        if vim.fn.filereadable(path) == 1 then
+            return path
+        end
+    end
+
+    -- Ask user if they want to proceed without lockfile
+    vim.notify("lazy-lock.json not found in any of these locations:", vim.log.levels.WARN)
+    for _, path in ipairs(lockfile_paths) do
+        vim.notify("  " .. path, vim.log.levels.WARN)
+    end
+
+    local choice = vim.fn.input("Would you like to proceed without a lockfile? (y/N): ")
+    if choice:lower() == "y" or choice:lower() == "yes" then
+        vim.notify("Proceeding without lockfile - plugins will install latest versions", vim.log.levels.INFO)
+        return false  -- Signal to proceed without lockfile
+    else
+        vim.notify("Stopping nvim initialization.", vim.log.levels.ERROR)
+        return nil
+    end
+end
+
+local function copy_and_restore_lockfile(source_path)
+    local nvim_config_path = vim.fn.expand("~/.config/nvim")
+    local target_lockfile = nvim_config_path .. "/lazy-lock.json"
+
+    -- Create config directory if it doesn't exist
+    if vim.fn.isdirectory(nvim_config_path) == 0 then
+        vim.fn.mkdir(nvim_config_path, "p")
+    end
+
+    -- Copy lockfile to nvim config directory
+    local source_content = vim.fn.readfile(source_path)
+    vim.fn.writefile(source_content, target_lockfile)
+    vim.notify("Copied lockfile from " .. source_path .. " to " .. target_lockfile, vim.log.levels.INFO)
+
+    return target_lockfile
+end
+
+local lockfile_result = check_lockfile()
+if lockfile_result == nil then
+    return
+end
+
+local lockfile_path = nil
+local should_restore = false
+
+if lockfile_result then
+    -- Found a lockfile, copy it to the right location and prepare for restore
+    lockfile_path = copy_and_restore_lockfile(lockfile_result)
+    should_restore = true
+else
+    -- User chose to proceed without lockfile
+    lockfile_path = nil
+end
 
 -- Your CodeCompanion setup
 local plugins = {
@@ -788,7 +890,65 @@ local plugins = {
     },
 }
 
-require("lazy.minit").repro({ spec = plugins })
+-- Setup lazy.nvim with or without lockfile
+local lazy_data_path = vim.fn.stdpath("data") .. "/lazy"
+local is_fresh_install = vim.fn.isdirectory(lazy_data_path) == 0
+
+local lazy_opts = {
+    install = {
+        missing = lockfile_path and false or true, -- Only auto-install if no lockfile
+    },
+    checker = {
+        enabled = false, -- Disable automatic checking for plugin updates
+    },
+    ui = {
+        -- Only show install window on fresh install
+        backdrop = is_fresh_install and 60 or 100,
+    },
+    performance = {
+        rtp = {
+            -- Disable some rtp plugins for faster startup after first install
+            disabled_plugins = not is_fresh_install and {
+                "gzip",
+                "matchit",
+                "matchparen",
+                "netrwPlugin",
+                "tarPlugin",
+                "tohtml",
+                "tutor",
+                "zipPlugin",
+            } or {},
+        },
+    },
+}
+
+if lockfile_path then
+    lazy_opts.lockfile = lockfile_path
+end
+
+require("lazy").setup(plugins, lazy_opts)
+
+-- Auto-close install window after completion on fresh install
+if is_fresh_install and not lockfile_path then
+    vim.api.nvim_create_autocmd("User", {
+        pattern = "LazyInstall",
+        once = true,
+        callback = function()
+            vim.defer_fn(function()
+                if vim.bo.filetype == "lazy" then
+                    vim.cmd("close")
+                end
+            end, 2000)
+        end,
+    })
+end
+
+-- Restore from lockfile if one was found and copied
+if should_restore then
+    vim.defer_fn(function()
+        vim.cmd("Lazy restore")
+    end, 100)
+end
 
 -- Setup Tree-sitter
 local ts_status, treesitter = pcall(require, "nvim-treesitter.configs")
