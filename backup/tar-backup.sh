@@ -278,7 +278,7 @@ fi
 # Build exclusion flags from array
 EXCLUDES=""
 for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    EXCLUDES="$EXCLUDES --exclude=$pattern"
+    EXCLUDES="$EXCLUDES --exclude='$pattern'"
 done
 msg "Using built-in exclusion patterns"
 
@@ -302,7 +302,7 @@ if [[ "$CLEANUP_BACKUPS" == true && "$USE_CUSTOM_FILENAME" != true ]]; then
     fi
 fi
 
-TEMP_DIR=$(mktemp -d)
+TEMP_DIR=$(mktemp -d ./tmp.XXXX)
 BACKUP_LOG="${TEMP_DIR}/backuplog.txt"
 BACKUP_ERROR_LOG="${TEMP_DIR}/backuplog-error.txt"
 cat /dev/null > "$BACKUP_LOG"
@@ -310,18 +310,19 @@ cat /dev/null > "$BACKUP_ERROR_LOG"
 
 CALC="Calculating backup file list size... "
 msgr "${CALC}"
-(tar ${EXCLUDES} -cvpPf /dev/null "$SOURCE_PATH" > /tmp/logsize 2> /dev/null) &
+(tar ${EXCLUDES} -cvpPf /dev/null "$SOURCE_PATH" > ${PWD}/logsize 2> /dev/null) &
 PID1=$!
 
 while [[ $(ps -p $PID1 -o pid=) ]]; do
     sleep 0.25
-    SIZE=$(du /tmp/logsize | cut -f 1)
-    FSIZE=$(printf "%'d" "${SIZE}")
-    msgr "${CALC}${FSIZE}K"
+    PFILE_COUNT=$(wc -l < "${PWD}/logsize" 2> /dev/null || echo 0)
+    # SIZE=$(wc -l ${PWD}/logsize | cut -f 1)
+    # FSIZE=$(printf "%'d" "${SIZE}")
+    msgr "\033[K${CALC}${PFILE_COUNT} files"
 done
 echo
 
-FIN_SIZE=$(du /tmp/logsize | cut -f 1)
+FILE_COUNT_TOTAL=$(cat ${PWD}/logsize | wc -l)
 
 BACKM="Performing backup... "
 msgr "${BACKM}"
@@ -338,22 +339,29 @@ SPINNER_INDEX=0
 
 while [[ $(ps -p $PID2 -o pid=) ]]; do
     sleep 0.5
+    MAX_COLUMNS=$(tput cols)
     CURRENT_TIME=$(date +%s)
+    PROGRESS_BAR_COLS=4 # for for the arrow and space
 
     # Get spinner character
     SPINNER_CHAR=${SPINNER_CHARS:$SPINNER_INDEX:1}
     SPINNER_INDEX=$(((SPINNER_INDEX + 1) % 4))
+    PROGRESS_BAR_COLS=$((PROGRESS_BAR_COLS + 1 + 1)) # 1=spinner 1=space
 
     # Count files processed (lines in log)
     if [[ -f "$BACKUP_LOG" ]]; then
+	# ughhhh....
         FILE_COUNT=$(wc -l < "$BACKUP_LOG" 2> /dev/null || echo 0)
     else
         FILE_COUNT=0
     fi
+    PROGRESS_BAR_COLS=$((PROGRESS_BAR_COLS + ${#FILE_COUNT} + ${#FILE_COUNT_TOTAL} + 2 + 2 + 1 + 5)) # 2=[] 2=space 1=/ 5=files
 
     if [[ -f "${BACKUP_DIR}/${FILENAME}" ]]; then
         BACKUP_SIZE_KB=$(du "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
-        BACKUP_SIZE_MB=$((BACKUP_SIZE_KB / 1024))
+        BACKUP_SIZE_MB=$(du -m "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
+        BACKUP_SIZE_HR=$(du -h "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
+        PROGRESS_BAR_COLS=$((PROGRESS_BAR_COLS + ${#BACKUP_SIZE_HR} + 1)) # +1 for space
 
         # Calculate speed in MB/s
         TIME_DIFF=$((CURRENT_TIME - PREV_TIME))
@@ -366,19 +374,22 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
         else
             SPEED_MBS=0
         fi
+	# PROGRESS_BAR_COLS=$((PROGRESS_BAR_COLS + ${#SPEED_MBS} + 1 + 4 )) # 1=space, 4=mb/s
+	PROGRESS_BAR_COLS=$((PROGRESS_BAR_COLS + 1 + 4 + 5 )) # 1=space, 4=text 4=mb/s
 
-        # Calculate percentage based on log file size
-        LOG_SIZE=$(du "$BACKUP_LOG" | cut -f 1)
-        if [[ ${FIN_SIZE} -gt 0 ]]; then
-            PERC=$((${LOG_SIZE} * 100 / ${FIN_SIZE}))
-        else
-            PERC=0
-        fi
-        FPERC=$(printf "%2d" ${PERC})
+        # bash math sux
+        PERC=$(python3 -c "print(round((${FILE_COUNT} / ${FILE_COUNT_TOTAL}) * 100))")
+	if [[ ${PERC} -gt 100 ]]; then
+	    # rounding error
+	    PERC="100"
+	fi
+	PROGRESS_BAR_COLS=$((PROGRESS_BAR_COLS + ${#PERC} + 1 + 1)) # 1=space 1=%
 
-        # Create progress bar (20 chars wide)
-        PROGRESS_WIDTH=20
-        FILLED_WIDTH=$((PERC * PROGRESS_WIDTH / 100))
+	PROGRESS_WIDTH=$((MAX_COLUMNS - PROGRESS_BAR_COLS - 2 - 2)) # 2=space 2=[] 3=adjustment
+	FILLED_WIDTH=$(python3 -c "print(round((${PERC} / ${PROGRESS_WIDTH}) * 100))")
+	if [[ ${FILLED_WIDTH} -gt 100 ]]; then
+	    FILLED_WIDTH=100
+	fi
         PROGRESS_BAR=""
         for ((i = 0; i < FILLED_WIDTH; i++)); do
             PROGRESS_BAR+="="
@@ -387,15 +398,22 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
             PROGRESS_BAR+=" "
         done
 
-        if [[ $BACKUP_SIZE_MB -gt 0 ]]; then
-            printf "\r\033[K${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files ${BACKUP_SIZE_MB}MB ${SPEED_MBS}MB/s ${SPINNER_CHAR}${ALL_OFF}" >&2
-        else
-            printf "\r\033[K${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] ${FPERC}%% ${FILE_COUNT} files${ALL_OFF}" >&2
-        fi
+        printf "\r\033[K${GREEN}==>${ALL_OFF}${BOLD} [${PROGRESS_BAR}] %3s%% [${FILE_COUNT}/${FILE_COUNT_TOTAL} files] ${BACKUP_SIZE_HR} %4sMB/s ${SPINNER_CHAR}${ALL_OFF}" "${PERC}" "${SPEED_MBS}"  >&2
+
+	# echo
+	# echo "pb_width: $PROGRESS_WIDTH"
+	# echo "pb_fill: $FILLED_WIDTH"
+	# echo "used_cols: $PROGRESS_BAR_COLS"
+	# echo "max_cols: $MAX_COLUMNS"
+
+
     else
+
+
+
         LOG_SIZE=$(du "$BACKUP_LOG" | cut -f 1)
-        if [[ ${FIN_SIZE} -gt 0 ]]; then
-            PERC=$((${LOG_SIZE} * 100 / ${FIN_SIZE}))
+        if [[ ${LOG_FIN_SIZE} -gt 0 ]]; then
+            PERC=$((${LOG_SIZE} * 100 / ${LOG_FIN_SIZE}))
         else
             PERC=0
         fi
@@ -417,36 +435,36 @@ while [[ $(ps -p $PID2 -o pid=) ]]; do
 done
 echo
 
-exit 1
-
 wait $PID2
 TAR_EXIT_CODE=$?
 TAR_FILE_SIZE=$(du -h "${BACKUP_DIR}/${FILENAME}" | cut -f 1)
 
-cd "$TEMP_DIR"
+exit $TAR_EXIT_CODE
 
-msg2 "Compressing backuplog.txt..."
-if [[ -f backuplog.zip ]]; then
-    rm -f backuplog.zip
-fi
-zip backuplog.zip backuplog.txt backuplog-error.txt &> /dev/null
-
-if [[ $TAR_EXIT_CODE > 1 ]]; then
-    error "The backup was not successful!"
-    if [[ "$SEND_EMAIL" == true ]]; then
-        msg2 "Sending log to ${EMAIL}..."
-        send_email "A problem occurred during backup.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
-${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-            "$HOSTNAME Backup FAILED" "${TEMP_DIR}/backuplog.zip"
-        msg2 "Done"
-    fi
-else
-    msg2 "Backup completed successfully."
-    if [[ "$SEND_EMAIL" == true ]]; then
-        msg2 "Sending log to ${EMAIL}..."
-        send_email "Backup completed successfully.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
-${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
-            "$HOSTNAME Backup SUCCESSFUL" "${TEMP_DIR}/backuplog.zip"
-        msg2 "Done"
-    fi
-fi
+# cd "$TEMP_DIR"
+#
+# msg2 "Compressing backuplog.txt..."
+# if [[ -f backuplog.zip ]]; then
+#     rm -f backuplog.zip
+# fi
+# zip backuplog.zip backuplog.txt backuplog-error.txt &> /dev/null
+#
+# if [[ $TAR_EXIT_CODE > 1 ]]; then
+#     error "The backup was not successful!"
+#     if [[ "$SEND_EMAIL" == true ]]; then
+#         msg2 "Sending log to ${EMAIL}..."
+#         send_email "A problem occurred during backup.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
+# ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
+#             "$HOSTNAME Backup FAILED" "${TEMP_DIR}/backuplog.zip"
+#         msg2 "Done"
+#     fi
+# else
+#     msg2 "Backup completed successfully."
+#     if [[ "$SEND_EMAIL" == true ]]; then
+#         msg2 "Sending log to ${EMAIL}..."
+#         send_email "Backup completed successfully.\n\nSource: $SOURCE_PATH\nDestination: $BACKUP_DIR\nExit code: \
+# ${TAR_EXIT_CODE}\nBackup file size: ${TAR_FILE_SIZE}" \
+#             "$HOSTNAME Backup SUCCESSFUL" "${TEMP_DIR}/backuplog.zip"
+#         msg2 "Done"
+#     fi
+# fi
