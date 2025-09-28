@@ -1,0 +1,1394 @@
+#!/bin/bash
+
+# Arch Linux installer for motorhead
+# Sets up a complete Arch Linux system using partition.sh, format.sh, mount.sh, and 04_packages.sh
+
+# Load common library functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../../lib.sh"
+
+# Check if running as root
+if [[ "$(id -u)" != "0" ]]; then
+    err "This script must be run as root"
+fi
+
+# Check if running on Arch Linux
+if [[ ! -f /etc/arch-release ]]; then
+    err "This script must be run on Arch Linux"
+fi
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEVICE="/dev/disk/by-id/nvme-KINGSTON_OM3PGP4128P-AH_0026B7382A48ED90"
+MOUNT_ROOT="/mnt/root"
+HOSTNAME="motorhead"
+
+# Password caching variable
+USER_PASSWORD=""
+
+# Setup logging
+LOG_FILE="archinstall-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE")
+exec 2> >(tee -a "$LOG_FILE" >&2)
+
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Install Arch Linux on motorhead system
+
+OPTIONS:
+    -h, --help              Show this help message
+    --help-long             Show detailed descriptions of each step
+    -f, --force             Skip confirmation prompts
+    --chroot                Mount partitions and drop into arch-chroot shell
+
+STEP OPTIONS (run individual or multiple steps):
+    --partition             Run partitioning step
+    --format                Run formatting step
+    --mount                 Run mounting step
+    --base-system           Run base system installation
+    --configure             Run system configuration
+    --bootloader            Run bootloader setup
+    --initramfs             Run initramfs generation
+    --configure-pacman      Run pacman configuration and repository setup
+    --packages              Run package installation
+    --groups                Run group configuration
+    --users                 Run user configuration
+    --sanity                Run boot readiness verification
+
+    Note: Multiple steps can be combined and will run in correct logical order
+
+    --steps-from STEP       Run from specified step to end
+
+EXAMPLES:
+    $0                                          # Full installation
+    $0 --force                                  # Full installation, skip prompts
+
+    # Single steps:
+    $0 --partition                              # Only partition device
+    $0 --configure-pacman                       # Only configure pacman.conf
+
+    # Multiple steps (run in logical order regardless of command line order):
+    $0 --format --mount                         # Format then mount
+
+    # Range of steps:
+    $0 --steps-from configure-pacman            # Run from pacman config to end
+
+EOF
+}
+
+show_help_long() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Install Arch Linux on motorhead system
+
+OPTIONS:
+    -h, --help              Show this help message
+    --help-long             Show detailed descriptions of each step
+    -f, --force             Skip confirmation prompts
+
+STEP OPTIONS (run individual or multiple steps):
+
+DETAILED STEP DESCRIPTIONS:
+
+1. --partition
+   Creates partition table on Samsung NVMe SSD with:
+   - 512MB EFI System Partition (FAT32)
+   - Remaining space as root partition (ext4)
+   Uses partition.sh script with GPT partitioning scheme
+
+2. --format
+   Formats the created partitions:
+   - EFI partition: FAT32 filesystem with proper labels
+   - Root partition: ext4 filesystem with optimal settings
+   Uses format.sh script with filesystem verification
+
+3. --mount
+   Mounts partitions to /mnt/root for installation:
+   - Root partition mounted at /mnt/root
+   - EFI partition mounted at /mnt/root/boot
+   Uses mount.sh script with proper mount options
+
+4. --base-system
+   Installs essential Arch Linux base system using pacstrap:
+   - base, linux-zen kernel, linux-firmware
+   - Development tools: base-devel, git, neovim
+   - Network: networkmanager, openssh
+   - Boot: grub, efibootmgr
+   - Shell: fish, sudo
+
+5. --configure
+   Configures the basic system settings:
+   - Generates fstab with NFS mounts for repositories
+   - Sets hostname to motorhead.alvaone.net
+   - Configures locale (en_US.UTF-8) and timezone (LA)
+   - Sets root password interactively
+   - Configures sudo for wheel group
+   - Enables NetworkManager and sshd services
+   - Configures SSH security (no root login)
+
+6. --bootloader
+   Installs and configures GRUB bootloader:
+   - Installs GRUB for UEFI systems
+   - Generates GRUB configuration with linux-zen as default
+
+7. --initramfs
+   Generates initial RAM filesystem:
+   - Creates initramfs for linux-zen kernel
+   - Provides early boot environment
+
+8. --configure-pacman
+   Customizes package manager configuration:
+   - Sets custom cache directory (/mnt/arch_pkg_cache)
+   - Enables VerbosePkgLists for detailed package info
+   - Enables multilib repository for 32-bit support
+   - Configures alvaone custom repository if available
+   - Sets up NFS systemd mount units
+
+9. --packages
+   Installs comprehensive package set (200+ packages):
+   - Development: docker, python, rust, go
+   - Desktop: gnome, gdm, chromium, firefox
+   - Media: vlc, obs-studio, gimp, krita
+   - Professional: datagrip, pycharm, rustrover
+   - System utilities and development tools
+   - automountnfs: NFS automounting via NetworkManager dispatcher
+   Enables GDM for graphical login
+
+    - Configures proper module loading order
+
+11. --groups
+    Sets up user groups and NFS directories:
+    - Creates bigdata group (GID 5000)
+    - Creates NFS mount directories
+    - Sets proper permissions for shared access
+
+12. --users
+    Creates and configures jesusa user:
+    - Creates user with host system UID/GID/groups
+    - Sets interactive password
+    - Configures fish shell and sudo access
+    - Maintains host system compatibility
+
+13. --sanity
+    Verifies system boot readiness:
+    - Checks EFI boot manager for GRUB entry
+    - Verifies GDM service is enabled
+    - Validates GRUB config contains linux-zen
+    - Confirms fstab entries are correct
+    - Checks initramfs and kernel files exist
+    - Verifies essential services and user config
+
+    --steps-from STEP       Run from specified step to end
+
+EXAMPLES:
+    $0                                          # Full installation
+    $0 --force                                  # Full installation, skip prompts
+
+    # Single steps:
+    $0 --partition                              # Only partition device
+    $0 --configure-pacman                       # Only configure pacman.conf
+
+    # Multiple steps (run in logical order regardless of command line order):
+    $0 --format --mount                         # Format then mount
+
+    # Range of steps:
+    $0 --steps-from configure-pacman            # Run from pacman config to end
+
+EOF
+}
+
+# Parse command line arguments
+FORCE=false
+STEPS_FROM=""
+CHROOT_MODE=false
+
+# Step flags
+STEP_PARTITION=false
+STEP_FORMAT=false
+STEP_MOUNT=false
+STEP_BASE_SYSTEM=false
+STEP_CONFIGURE=false
+STEP_BOOTLOADER=false
+STEP_INITRAMFS=false
+STEP_CONFIGURE_PACMAN=false
+STEP_PACKAGES=false
+STEP_GROUPS=false
+STEP_USERS=false
+STEP_SANITY=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h | --help)
+            show_help
+            exit 0
+            ;;
+        --help-long)
+            show_help_long
+            exit 0
+            ;;
+        -f | --force)
+            FORCE=true
+            shift
+            ;;
+        --chroot)
+            CHROOT_MODE=true
+            shift
+            ;;
+        --partition)
+            STEP_PARTITION=true
+            shift
+            ;;
+        --format)
+            STEP_FORMAT=true
+            shift
+            ;;
+        --mount)
+            STEP_MOUNT=true
+            shift
+            ;;
+        --base-system)
+            STEP_BASE_SYSTEM=true
+            shift
+            ;;
+        --configure)
+            STEP_CONFIGURE=true
+            shift
+            ;;
+        --bootloader)
+            STEP_BOOTLOADER=true
+            shift
+            ;;
+        --initramfs)
+            STEP_INITRAMFS=true
+            shift
+            ;;
+        --configure-pacman)
+            STEP_CONFIGURE_PACMAN=true
+            shift
+            ;;
+        --packages)
+            STEP_PACKAGES=true
+            shift
+            ;;
+        --groups)
+            STEP_GROUPS=true
+            shift
+            ;;
+        --users)
+            STEP_USERS=true
+            STEP_SANITY=true
+            shift
+            ;;
+        --sanity)
+            STEP_SANITY=true
+            shift
+            ;;
+        --steps-from)
+            if [[ -z "$2" ]]; then
+                err "--steps-from requires a step name"
+            fi
+            STEPS_FROM="$2"
+            shift 2
+            ;;
+        *)
+            err "Unknown option: $1"
+            ;;
+    esac
+done
+
+# Handle --steps-from flag
+if [[ -n "$STEPS_FROM" ]]; then
+    case "$STEPS_FROM" in
+        partition)
+            STEP_PARTITION=true
+            STEP_FORMAT=true
+            STEP_MOUNT=true
+            STEP_BASE_SYSTEM=true
+            STEP_CONFIGURE=true
+            STEP_BOOTLOADER=true
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        format)
+            STEP_FORMAT=true
+            STEP_MOUNT=true
+            STEP_BASE_SYSTEM=true
+            STEP_CONFIGURE=true
+            STEP_BOOTLOADER=true
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        mount)
+            STEP_MOUNT=true
+            STEP_BASE_SYSTEM=true
+            STEP_CONFIGURE=true
+            STEP_BOOTLOADER=true
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        base-system)
+            STEP_BASE_SYSTEM=true
+            STEP_CONFIGURE=true
+            STEP_BOOTLOADER=true
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        configure)
+            STEP_CONFIGURE=true
+            STEP_BOOTLOADER=true
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        bootloader)
+            STEP_BOOTLOADER=true
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        initramfs)
+            STEP_INITRAMFS=true
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        configure-pacman)
+            STEP_CONFIGURE_PACMAN=true
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        packages)
+            STEP_PACKAGES=true
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        groups)
+            STEP_GROUPS=true
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        users)
+            STEP_USERS=true
+            STEP_SANITY=true
+            ;;
+        sanity)
+            STEP_SANITY=true
+            ;;
+        *)
+            err "Invalid step name: $STEPS_FROM"
+            ;;
+    esac
+fi
+
+# Setup alvaone repository first
+setup_alvaone_repo() {
+    msg "Setting up alvaone repository..."
+
+    local setup_script="$SCRIPT_DIR/../../usb-tools/setup-alvaone-repo.sh"
+    if [[ -f "$setup_script" ]]; then
+        "$setup_script" || {
+            warn "Failed to setup alvaone repository - continuing with standard repositories"
+        }
+    else
+        warn "Alvaone repository setup script not found - continuing with standard repositories"
+    fi
+}
+
+msg "Arch Linux installer for motorhead"
+msg "All output is being logged to: $PWD/$LOG_FILE"
+
+# Check if any step flags are set
+ANY_STEP_FLAG=false
+for flag in "$STEP_PARTITION" "$STEP_FORMAT" "$STEP_MOUNT" "$STEP_BASE_SYSTEM" "$STEP_CONFIGURE" "$STEP_BOOTLOADER" "$STEP_INITRAMFS" "$STEP_CONFIGURE_PACMAN" "$STEP_PACKAGES" "$STEP_GROUPS" "$STEP_USERS" "$STEP_SANITY"; do
+    if [[ "$flag" == true ]]; then
+        ANY_STEP_FLAG=true
+        break
+    fi
+done
+
+# Only run setup and confirmations for full installation
+if [[ "$ANY_STEP_FLAG" != true && "$CHROOT_MODE" != true ]]; then
+    # Check if /mnt/root is mounted and unmount it
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
+        msg "Unmounting existing installation at $MOUNT_ROOT..."
+        umount -R "$MOUNT_ROOT" || {
+            err "Failed to unmount $MOUNT_ROOT"
+        }
+    fi
+
+    # Check if any partitions of the target device are mounted elsewhere and unmount them
+    target_device_path=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
+    target_device_name=$(basename "$target_device_path")
+
+    msg "Checking for mounted partitions on target device..."
+    mounted_partitions=$(mount | grep "$target_device_name" | awk '{print $1}' || true)
+    if [[ -n "$mounted_partitions" ]]; then
+        msg "Unmounting target device partitions..."
+        echo "$mounted_partitions" | while read -r partition; do
+            mountpoint=$(mount | grep "$partition" | awk '{print $3}')
+            msg "Unmounting $partition from $mountpoint"
+            umount "$partition" 2> /dev/null || warn "Failed to unmount $partition"
+        done
+    else
+        msg "No mounted partitions found on target device"
+    fi
+
+    # Turn off any swap on target device
+    if swapon --show | grep -q "$target_device_name"; then
+        msg "Disabling swap on target device..."
+        swapon --show | grep "$target_device_name" | awk '{print $1}' | while read -r swap_partition; do
+            swapoff "$swap_partition" || warn "Failed to disable swap on $swap_partition"
+        done
+    fi
+
+    sleep 2
+
+    # Cache password for both root and user (unless --force is used) - ask early
+    if [[ "$FORCE" != true ]]; then
+        while true; do
+            msg "Please enter a password to use for both root and jesusa users:"
+            read -s -p "Password: " USER_PASSWORD
+            echo
+            read -s -p "Confirm password: " USER_PASSWORD_CONFIRM
+            echo
+            if [[ "$USER_PASSWORD" == "$USER_PASSWORD_CONFIRM" ]]; then
+                break
+            else
+                warn "Passwords do not match. Please try again."
+                echo
+            fi
+        done
+    fi
+
+    # Setup alvaone repository at the very beginning
+    setup_alvaone_repo
+
+    # Show device information
+    msg "Target device: $DEVICE"
+    lsblk "$DEVICE" 2> /dev/null | sed 's/^/    /' || {
+        err "Failed to read device information"
+    }
+
+    # Confirmation unless --force
+    if [[ "$FORCE" != true ]]; then
+        echo
+        warn "This will completely destroy all data on $DEVICE!"
+        read -p "Are you sure you want to continue? (y/N): " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            msg "Operation cancelled"
+            exit 0
+        fi
+    fi
+fi
+
+# Cache password for specific steps that need it (configure or users steps)
+if [[ "$STEP_CONFIGURE" == true || "$STEP_USERS" == true ]] && [[ -z "$USER_PASSWORD" ]] && [[ "$FORCE" != true ]]; then
+    while true; do
+        msg "Please enter a password to use for both root and jesusa users:"
+        read -s -p "Password: " USER_PASSWORD
+        echo
+        read -s -p "Confirm password: " USER_PASSWORD_CONFIRM
+        echo
+        if [[ "$USER_PASSWORD" == "$USER_PASSWORD_CONFIRM" ]]; then
+            break
+        else
+            warn "Passwords do not match. Please try again."
+            echo
+        fi
+    done
+fi
+
+# Function to ask user about unmounting (on any exit)
+ask_unmount_on_exit() {
+    local exit_code=$?
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
+        echo
+        if [[ $exit_code -ne 0 ]]; then
+            warn "Installation failed. The filesystem is still mounted for debugging."
+        fi
+        read -p "Do you want to unmount $MOUNT_ROOT? (y/N): " -r
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            msg "Unmounting $MOUNT_ROOT"
+            umount -R "$MOUNT_ROOT" 2> /dev/null
+            msg "Unmounted successfully"
+        else
+            msg "Leaving $MOUNT_ROOT mounted"
+        fi
+    fi
+}
+
+# Function to ask user about unmounting at the end of successful installation
+ask_unmount() {
+    if mountpoint -q "$MOUNT_ROOT" 2> /dev/null; then
+        echo
+        read -p "Do you want to unmount $MOUNT_ROOT? (y/N): " -r
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            msg "Unmounting $MOUNT_ROOT"
+            umount -R "$MOUNT_ROOT" 2> /dev/null
+            msg "Unmounted successfully"
+        else
+            msg "Leaving $MOUNT_ROOT mounted"
+        fi
+    fi
+}
+
+# Signal handling for immediate cleanup
+cleanup_on_signal() {
+    local signal=$1
+    msg "Received signal $signal - cleaning up and exiting..."
+
+    # Clean up any bind mounts that might still be active
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null; then
+        umount "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null || true
+    fi
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null; then
+        umount "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null || true
+    fi
+
+    # Call the normal exit handler
+    ask_unmount_on_exit
+    exit 130 # Standard exit code for Ctrl+C
+}
+
+# Count selected steps to determine behavior
+SELECTED_STEP_COUNT=0
+[[ "$STEP_PARTITION" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_FORMAT" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_MOUNT" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_BASE_SYSTEM" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_CONFIGURE" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_BOOTLOADER" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_INITRAMFS" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_CONFIGURE_PACMAN" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_PACKAGES" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_GROUPS" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_USERS" == true ]] && ((SELECTED_STEP_COUNT++))
+[[ "$STEP_SANITY" == true ]] && ((SELECTED_STEP_COUNT++))
+
+# Set up signal traps for immediate response
+trap 'cleanup_on_signal SIGINT' INT
+trap 'cleanup_on_signal SIGTERM' TERM
+# Set EXIT trap for full installation or multiple steps, but not single steps
+if [[ "$ANY_STEP_FLAG" != true ]] || [[ "$SELECTED_STEP_COUNT" -gt 1 ]]; then
+    trap ask_unmount_on_exit EXIT
+fi
+
+# Helper function for step signposting
+step_begin() {
+    local step_name="$1"
+    local restart_option="$2"
+    echo
+    msg "═══════════════════════════════════════════════════════════════"
+    msg "🔄 STARTING: $step_name"
+    msg "💡 To restart from this step: ./archinstall.sh --steps-from $restart_option"
+    msg "═══════════════════════════════════════════════════════════════"
+}
+
+step_complete() {
+    local step_name="$1"
+    echo
+    msg "═══════════════════════════════════════════════════════════════"
+    msg "✅ COMPLETED: $step_name"
+    msg "═══════════════════════════════════════════════════════════════"
+    echo
+}
+
+# Step 4: Install base system with pacstrap
+install_base_system() {
+    msg "Installing base system with pacstrap..."
+
+    # Check if pacstrap is available
+    if ! command -v pacstrap &> /dev/null; then
+        err "pacstrap not found. Please install arch-install-scripts"
+    fi
+
+    # Verify mount point exists and is properly mounted
+    if [[ ! -d "$MOUNT_ROOT" ]]; then
+        err "Mount root directory $MOUNT_ROOT does not exist"
+    fi
+
+    if ! mountpoint -q "$MOUNT_ROOT"; then
+        err "$MOUNT_ROOT is not mounted"
+    fi
+
+    # Base packages for a minimal but functional system
+    local base_packages=(
+        base
+        linux-zen
+        linux-zen-headers
+        linux-firmware
+        base-devel
+        grub
+        efibootmgr
+        networkmanager
+        sudo
+        fish
+        neovim
+        git
+        openssh
+    )
+
+    # Debug: Check mount point and available space before pacstrap
+    msg "Mount point status before pacstrap:"
+    msg "Directory exists: $(test -d "$MOUNT_ROOT" && echo "YES" || echo "NO")"
+    msg "Mount status: $(mountpoint -q "$MOUNT_ROOT" && echo "MOUNTED" || echo "NOT MOUNTED")"
+    msg "Available space:"
+    df -h "$MOUNT_ROOT" || true
+    msg "Mount point contents:"
+    ls -la "$MOUNT_ROOT" || true
+    msg "Active mounts:"
+    mount | grep "$MOUNT_ROOT" || true
+
+    # Run pacstrap to install base packages with verbose output
+    msg "Running pacstrap with packages: ${base_packages[*]}"
+    msg "Command: pacstrap -c '$MOUNT_ROOT' --noconfirm ${base_packages[*]}"
+
+    # Run pacstrap and capture both stdout and stderr
+    if ! pacstrap -c "$MOUNT_ROOT" --noconfirm "${base_packages[@]}" 2>&1 | tee /tmp/pacstrap.log; then
+        err "Failed to install base system"
+        msg "pacstrap exit code: ${PIPESTATUS[0]}"
+        msg "pacstrap output (last 20 lines):"
+        tail -20 /tmp/pacstrap.log || true
+        msg "Mount point contents after failed pacstrap:"
+        ls -la "$MOUNT_ROOT" || true
+        msg "Filesystem status after failure:"
+        df -h "$MOUNT_ROOT" || true
+        return 1
+    fi
+
+    # Verify base system was actually installed
+    msg "Verifying base system installation..."
+    missing_dirs=()
+    for dir in etc usr bin sbin lib; do
+        if [[ ! -d "$MOUNT_ROOT/$dir" ]]; then
+            missing_dirs+=("$dir")
+        fi
+    done
+
+    if [[ ${#missing_dirs[@]} -gt 0 ]]; then
+        err "Base system installation incomplete - missing directories: ${missing_dirs[*]}"
+        msg "Mount point contents after pacstrap:"
+        ls -la "$MOUNT_ROOT" || true
+        msg "Checking what was actually installed:"
+        find "$MOUNT_ROOT" -maxdepth 2 -type d | head -20 || true
+        return 1
+    fi
+
+    # Additional verification: check for key files
+    key_files=("/etc/pacman.conf" "/usr/bin/bash" "/bin/sh")
+    missing_files=()
+    for file in "${key_files[@]}"; do
+        if [[ ! -e "$MOUNT_ROOT$file" ]]; then
+            missing_files+=("$file")
+        fi
+    done
+
+    if [[ ${#missing_files[@]} -gt 0 ]]; then
+        warn "Some expected files missing: ${missing_files[*]}"
+        msg "This may indicate an incomplete installation"
+    fi
+
+    # Sync after package installation
+    sync
+    msg "Base system installed successfully"
+    msg "Installation summary:"
+    msg "  Root filesystem size: $(du -sh "$MOUNT_ROOT" 2> /dev/null | cut -f1 || echo "unknown")"
+    msg "  Key directories present: $(ls -d "$MOUNT_ROOT"/{etc,usr,bin,sbin,lib} 2> /dev/null | wc -l || echo "0")/5"
+}
+
+# Step 5: Configure the system
+configure_system() {
+    msg "Configuring system..."
+
+    # Generate fstab with header comments
+    cat > "$MOUNT_ROOT/etc/fstab" << 'EOF'
+# Static information about the filesystems.
+# See fstab(5) for details.
+
+# <file system> <dir> <type> <options> <dump> <pass>
+EOF
+
+    # Generate fstab entries and append, filtering out non-target devices
+    # Get the target device name to only include partitions from our target device
+    target_device_path=$(readlink -f "$DEVICE" 2> /dev/null || echo "$DEVICE")
+    target_device_name=$(basename "$target_device_path")
+
+    # Generate raw fstab and filter to only include target device partitions
+    genfstab -U "$MOUNT_ROOT" | while IFS= read -r line; do
+        # Handle comments - filter out comments for non-target devices
+        if [[ "$line" =~ ^[[:space:]]*# ]]; then
+            # Check if this comment references a non-target device
+            if [[ "$line" =~ /dev/[^[:space:]]+ ]]; then
+                comment_device=$(echo "$line" | grep -o '/dev/[^[:space:]]*')
+                comment_device_name=$(basename "$comment_device")
+                # Only include comments for our target device partitions
+                if [[ "$comment_device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                    echo "$line"
+                fi
+                # Skip comments for non-target devices (archiso, etc.)
+            else
+                # Include non-device comments (headers, etc.)
+                echo "$line"
+            fi
+            continue
+        fi
+
+        # Skip empty lines - pass them through
+        if [[ -z "${line// /}" ]]; then
+            echo "$line"
+            continue
+        fi
+
+        # Parse fstab entry
+        device=$(echo "$line" | awk '{print $1}')
+        mountpoint=$(echo "$line" | awk '{print $2}')
+        fstype=$(echo "$line" | awk '{print $3}')
+
+        # Skip special filesystems - pass them through
+        case "$fstype" in
+            proc | sysfs | devpts | tmpfs | devtmpfs)
+                echo "$line"
+                continue
+                ;;
+        esac
+
+        # Check if this device belongs to our target device
+        include_device=false
+        if [[ "$device" =~ ^UUID= ]]; then
+            uuid=${device#UUID=}
+            # Look up the actual device for this UUID
+            uuid_device=$(readlink -f "/dev/disk/by-uuid/$uuid" 2> /dev/null)
+            if [[ -n "$uuid_device" ]]; then
+                uuid_device_name=$(basename "$uuid_device")
+                # Only include if it's from our target device (e.g., nvme0n1p1-5)
+                if [[ "$uuid_device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                    include_device=true
+                fi
+            fi
+        elif [[ "$device" =~ ^/dev/ ]]; then
+            device_name=$(basename "$device")
+            # Only include if it's from our target device
+            if [[ "$device_name" =~ ^${target_device_name}p[1-5]$ ]]; then
+                include_device=true
+            fi
+        fi
+
+        # Include the device if it passed validation
+        if [[ "$include_device" == "true" ]]; then
+            echo "$line"
+        else
+            # Output to stderr so it doesn't go into fstab file
+            msg "Filtering out non-target device from fstab: $device ($mountpoint, $fstype)" >&2
+        fi
+    done >> "$MOUNT_ROOT/etc/fstab" || {
+        err "Failed to generate fstab"
+        return 1
+    }
+
+    # Add commented NFS mounts (managed by AutoMountNFS package and systemd service units)
+    cat >> "$MOUNT_ROOT/etc/fstab" << 'EOF'
+
+# NFS mounts for alvaone repository and backups
+# These comments are configuration for AutoMountNFS ONLY
+# These are managed by the AutoMountNFS package that manages systemd service units (not systemd auto mount handling since it is finicky)
+# nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo     /mnt/arch_repo          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=3 0 0
+# nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache        /mnt/arch_pkg_cache     nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=3 0 0
+# nas.alvaone.net:/mnt/bigdata/backups                    /mnt/backups            nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=3 0 0
+EOF
+
+    # Set hostname
+    echo "$HOSTNAME" > "$MOUNT_ROOT/etc/hostname"
+
+    # Set FQDN hostname using hostnamectl
+    msg "Setting FQDN hostname using hostnamectl..."
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" hostnamectl set-hostname "$HOSTNAME.alvaone.net" || {
+        err "Failed to set FQDN hostname with hostnamectl"
+        return 1
+    }
+
+    # Configure locale
+    echo "en_US.UTF-8 UTF-8" > "$MOUNT_ROOT/etc/locale.gen"
+    echo "LANG=en_US.UTF-8" > "$MOUNT_ROOT/etc/locale.conf"
+
+    # Set timezone
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" ln -sf /usr/share/zoneinfo/America/Los_Angeles /etc/localtime || {
+        err "Failed to set timezone"
+        return 1
+    }
+
+    # Generate locale
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" locale-gen || {
+        err "Failed to generate locales"
+        return 1
+    }
+
+    # Set root password using cached password
+    msg "Setting root password..."
+    if [[ -n "$USER_PASSWORD" ]]; then
+        echo "root:$USER_PASSWORD" | arch-chroot "$MOUNT_ROOT" chpasswd || {
+            err "Failed to set root password"
+            return 1
+        }
+    else
+        msg "You will be prompted to enter a password for the root user"
+        arch-chroot "$MOUNT_ROOT" passwd root || {
+            err "Failed to set root password"
+            return 1
+        }
+    fi
+
+    # Configure sudo
+    echo "%wheel ALL=(ALL:ALL) ALL" >> "$MOUNT_ROOT/etc/sudoers"
+
+    # Enable essential services
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" systemctl enable NetworkManager || {
+        err "Failed to enable NetworkManager"
+        return 1
+    }
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" systemctl enable sshd || {
+        err "Failed to enable sshd"
+        return 1
+    }
+
+    # Configure SSH to disable root login
+    msg "Configuring SSH security settings..."
+    echo "PermitRootLogin no" >> "$MOUNT_ROOT/etc/ssh/sshd_config"
+    echo "PasswordAuthentication yes" >> "$MOUNT_ROOT/etc/ssh/sshd_config"
+    echo "PubkeyAuthentication yes" >> "$MOUNT_ROOT/etc/ssh/sshd_config"
+
+    # Configure hostname resolution
+    cat > "$MOUNT_ROOT/etc/hosts" << EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOSTNAME.alvaone.net $HOSTNAME
+EOF
+
+    msg "System configured successfully"
+}
+
+# Step 6: Install and configure bootloader
+setup_bootloader() {
+    msg "Setting up GRUB bootloader..."
+
+    # Configure GRUB to show systemd boot messages (remove quiet and loglevel=3)
+    msg "Configuring GRUB for verbose boot with systemd messages..."
+
+    # Modify GRUB defaults to remove quiet boot and allow verbose systemd messages
+    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=".*"/GRUB_CMDLINE_LINUX_DEFAULT=""/' "$MOUNT_ROOT/etc/default/grub" || {
+        # If the file doesn't exist or sed fails, create/append the setting
+        echo 'GRUB_CMDLINE_LINUX_DEFAULT=""' >> "$MOUNT_ROOT/etc/default/grub"
+    }
+
+    # Install GRUB to EFI partition
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB || {
+        err "Failed to install GRUB"
+        return 1
+    }
+
+    # Generate GRUB configuration
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" grub-mkconfig -o /boot/grub/grub.cfg || {
+        err "Failed to generate GRUB configuration"
+        return 1
+    }
+
+    msg "Bootloader configured successfully with verbose systemd boot messages"
+}
+
+# Step 7: Generate initramfs
+generate_initramfs() {
+    msg "Generating initramfs..."
+
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" mkinitcpio -P || {
+        err "Failed to generate initramfs"
+        return 1
+    }
+
+    # Sync after initramfs generation
+    sync
+    msg "Initramfs generated successfully"
+}
+
+# Step 8: Configure pacman and setup repositories
+setup_pacman_and_repos() {
+    msg "Configuring pacman and setting up repositories..."
+
+    # Customize pacman.conf with CacheDir and other settings
+    msg "Customizing pacman.conf..."
+    if [[ -f "$MOUNT_ROOT/etc/pacman.conf" ]]; then
+        # Update CacheDir setting
+        sed -i 's|^#CacheDir.*|CacheDir    = /mnt/arch_pkg_cache/ # trailing slash required|' "$MOUNT_ROOT/etc/pacman.conf"
+
+        # Uncomment VerbosePkgLists
+        sed -i 's|^#VerbosePkgLists|VerbosePkgLists|' "$MOUNT_ROOT/etc/pacman.conf"
+
+        # Uncomment multilib repository
+        sed -i '/^#\[multilib\]/,/^#Include = \/etc\/pacman.d\/mirrorlist/{s/^#//}' "$MOUNT_ROOT/etc/pacman.conf"
+
+        msg "Updated CacheDir, VerbosePkgLists, and enabled multilib repository in pacman.conf"
+    fi
+
+    # Copy alvaone repo setup if the host has it configured
+    if [[ -f /etc/pacman.d/alvaone ]]; then
+        cp /etc/pacman.d/alvaone "$MOUNT_ROOT/etc/pacman.d/"
+
+        # Update pacman.conf in new system to include alvaone repo
+        if ! grep -q "Include.*alvaone" "$MOUNT_ROOT/etc/pacman.conf"; then
+            echo "" >> "$MOUNT_ROOT/etc/pacman.conf"
+            echo "Include = /etc/pacman.d/alvaone" >> "$MOUNT_ROOT/etc/pacman.conf"
+            msg "Added alvaone repository to new system"
+        fi
+    fi
+
+}
+
+# Helper function to setup repository bind mounts
+setup_repository_bind_mounts() {
+    # Create directories for bind mounts and set up alvaone repository access
+    msg "Setting up repository bind mounts in chroot..."
+    mkdir -p "$MOUNT_ROOT/mnt/arch_repo" "$MOUNT_ROOT/mnt/arch_pkg_cache" || {
+        err "Failed to create repository mount directories in chroot"
+        return 1
+    }
+
+    # Bind mount alvaone repository and package cache from host if available
+    if mountpoint -q /mnt/arch_repo 2> /dev/null; then
+        if ! mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null; then
+            msg "Bind mounting alvaone repository..."
+            mount --bind /mnt/arch_repo "$MOUNT_ROOT/mnt/arch_repo" || {
+                err "Failed to bind mount alvaone repository"
+                return 1
+            }
+        fi
+    else
+        warn "Host alvaone repository not mounted - 04_packages.sh may fail"
+    fi
+
+    if mountpoint -q /mnt/arch_pkg_cache 2> /dev/null; then
+        if ! mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null; then
+            msg "Bind mounting package cache..."
+            mount --bind /mnt/arch_pkg_cache "$MOUNT_ROOT/mnt/arch_pkg_cache" || {
+                err "Failed to bind mount package cache"
+                return 1
+            }
+        fi
+    else
+        warn "Host package cache not mounted - 04_packages.sh may be slower"
+    fi
+}
+
+# Helper function to cleanup repository bind mounts
+cleanup_repository_bind_mounts() {
+    msg "Cleaning up bind mounts..."
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_repo" 2> /dev/null; then
+        umount "$MOUNT_ROOT/mnt/arch_repo" || warn "Failed to unmount alvaone repository bind mount"
+    fi
+    if mountpoint -q "$MOUNT_ROOT/mnt/arch_pkg_cache" 2> /dev/null; then
+        umount "$MOUNT_ROOT/mnt/arch_pkg_cache" || warn "Failed to unmount package cache bind mount"
+    fi
+}
+
+# Step 9: Install additional packages
+install_packages() {
+    msg "Installing additional packages..."
+
+    # Check if 04_packages.sh exists
+    if [[ ! -f "$SCRIPT_DIR/04_packages.sh" ]]; then
+        err "04_packages.sh not found at $SCRIPT_DIR/04_packages.sh"
+    fi
+
+    # Debug: Show what we're working with
+    msg "Source: $SCRIPT_DIR/04_packages.sh"
+    msg "Mount point: $MOUNT_ROOT"
+    msg "Target: $MOUNT_ROOT/root/"
+
+    # Ensure the /root directory exists in chroot
+    mkdir -p "$MOUNT_ROOT/root" || {
+        err "Failed to create /root directory in chroot"
+    }
+
+    # Setup repository bind mounts
+    setup_repository_bind_mounts || return 1
+
+    # Copy 04_packages.sh to the new system and run it in chroot
+    cp "$SCRIPT_DIR/04_packages.sh" "$MOUNT_ROOT/root/" || {
+        err "Failed to copy 04_packages.sh to chroot environment"
+    }
+    chmod +x "$MOUNT_ROOT/root/04_packages.sh"
+
+    # Verify the file was copied successfully
+    if [[ ! -f "$MOUNT_ROOT/root/04_packages.sh" ]]; then
+        err "04_packages.sh was not successfully copied to $MOUNT_ROOT/root/"
+    fi
+
+    msg "Successfully copied 04_packages.sh to chroot environment"
+
+    # Run packages installation in chroot with better signal handling
+    msg "Running packages installation..."
+    msg "Note: This may take a while. Press Ctrl+C to cancel if needed."
+
+    # Use a more direct approach that handles signals better
+    if ! arch-chroot "$MOUNT_ROOT" /root/04_packages.sh --force; then
+        # Clean up bind mounts even on failure
+        msg "Package installation failed - cleaning up bind mounts..."
+        cleanup_repository_bind_mounts
+        err "Package installation failed"
+    fi
+
+    # Clean up
+    rm -f "$MOUNT_ROOT/root/04_packages.sh"
+
+    # Only unmount bind mounts if this is not part of a multi-step run
+    # If ANY_STEP_FLAG is false, we're doing a full install and should cleanup
+    # If ANY_STEP_FLAG is true and only STEP_PACKAGES is true, we should cleanup
+    if [[ "$ANY_STEP_FLAG" == false ]] || [[ "$STEP_PACKAGES" == true && "$STEP_GROUPS" != true && "$STEP_USERS" != true ]]; then
+        cleanup_repository_bind_mounts
+    else
+        msg "Keeping bind mounts for subsequent steps"
+    fi
+
+    # Enable gdm service now that it's installed
+    msg "Enabling gdm service..."
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" systemctl enable gdm || {
+        err "Failed to enable gdm"
+        return 1
+    }
+
+    msg "Package installation completed"
+}
+
+# Step 10: Configure groups
+configure_groups() {
+    msg "Configuring groups..."
+
+    # Check if groups.sh exists
+    if [[ ! -f "$SCRIPT_DIR/05_groups.sh" ]]; then
+        err "groups.sh not found at $SCRIPT_DIR/groups.sh"
+        return 1
+    fi
+
+    # Run groups configuration
+    "$SCRIPT_DIR/05_groups.sh" -m "$MOUNT_ROOT" || {
+        err "Group configuration failed"
+        return 1
+    }
+
+    # Create and configure bigdata NFS directories
+    msg "Creating bigdata NFS mount directories..."
+    for dir in /mnt/arch_repo /mnt/arch_pkg_cache /mnt/backups; do
+        run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" mkdir -p "$dir" || {
+            err "Failed to create directory $dir"
+            return 1
+        }
+    done
+
+    # Set proper ownership and permissions for bigdata directories
+    msg "Setting bigdata directory permissions..."
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chgrp bigdata /mnt/arch_repo /mnt/arch_pkg_cache /mnt/backups || {
+        err "Failed to set group ownership on bigdata directories"
+        return 1
+    }
+
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chmod g+w /mnt/arch_repo /mnt/arch_pkg_cache /mnt/backups || {
+        err "Failed to set group write permissions on bigdata directories"
+        return 1
+    }
+
+    # Set sticky bit so new files inherit group ownership
+    run_cmd_no_subshell arch-chroot "$MOUNT_ROOT" chmod g+s /mnt/arch_repo /mnt/arch_pkg_cache /mnt/backups || {
+        err "Failed to set sticky bit on bigdata directories"
+        return 1
+    }
+
+    msg "Group configuration completed"
+}
+
+# Step 11: Configure users
+configure_users() {
+    msg "Configuring users..."
+
+    # Check if users.sh exists
+    if [[ ! -f "$SCRIPT_DIR/06_users.sh" ]]; then
+        err "users.sh not found at $SCRIPT_DIR/users.sh"
+        return 1
+    fi
+
+    # Run users configuration with cached password
+    if [[ -n "$USER_PASSWORD" ]]; then
+        USER_PASSWORD="$USER_PASSWORD" "$SCRIPT_DIR/06_users.sh" -m "$MOUNT_ROOT" || {
+            err "User configuration failed"
+            return 1
+        }
+    else
+        "$SCRIPT_DIR/06_users.sh" -m "$MOUNT_ROOT" || {
+            err "User configuration failed"
+            return 1
+        }
+    fi
+
+    msg "User configuration completed"
+}
+
+# Step 12: Sanity check - verify system is ready to boot
+perform_sanity_check() {
+    msg "Performing sanity check..."
+
+    # Check if sanity.sh exists
+    if [[ ! -f "$SCRIPT_DIR/07_sanity.sh" ]]; then
+        err "sanity.sh not found at $SCRIPT_DIR/sanity.sh"
+        return 1
+    fi
+
+    # Run sanity check
+    "$SCRIPT_DIR/07_sanity.sh" "$MOUNT_ROOT" || {
+        err "Sanity check failed - system may not boot properly"
+        return 1
+    }
+
+    msg "Sanity check completed successfully"
+}
+
+# Handle --chroot mode
+if [[ "$CHROOT_MODE" == true ]]; then
+    msg "Chroot mode: Mounting partitions and launching arch-chroot shell"
+
+    # Mount partitions
+    msg "Step 3: Mounting partitions..."
+    "$SCRIPT_DIR/03_mount.sh" || {
+        err "Mounting failed"
+        exit 1
+    }
+    msg "✓ Partitions mounted at $MOUNT_ROOT"
+
+    # Launch arch-chroot shell with fish
+    msg "Launching arch-chroot with fish shell at $MOUNT_ROOT"
+    msg "Type 'exit' to return to host system"
+    exec arch-chroot "$MOUNT_ROOT" /usr/bin/fish
+fi
+
+# Execute installation steps
+if [[ "$ANY_STEP_FLAG" == true ]]; then
+    msg "Running selected installation steps in correct order..."
+
+    # Count selected steps for progress tracking
+    selected_steps=()
+    [[ "$STEP_PARTITION" == true ]] && selected_steps+=("partition")
+    [[ "$STEP_FORMAT" == true ]] && selected_steps+=("format")
+    [[ "$STEP_MOUNT" == true ]] && selected_steps+=("mount")
+    [[ "$STEP_BASE_SYSTEM" == true ]] && selected_steps+=("base-system")
+    [[ "$STEP_CONFIGURE" == true ]] && selected_steps+=("configure")
+    [[ "$STEP_BOOTLOADER" == true ]] && selected_steps+=("bootloader")
+    [[ "$STEP_INITRAMFS" == true ]] && selected_steps+=("initramfs")
+    [[ "$STEP_CONFIGURE_PACMAN" == true ]] && selected_steps+=("configure-pacman")
+    [[ "$STEP_PACKAGES" == true ]] && selected_steps+=("packages")
+    [[ "$STEP_GROUPS" == true ]] && selected_steps+=("groups")
+    [[ "$STEP_USERS" == true ]] && selected_steps+=("users")
+    [[ "$STEP_SANITY" == true ]] && selected_steps+=("sanity")
+
+    msg "Selected steps (${#selected_steps[@]}): ${selected_steps[*]}"
+    echo
+
+    # Run individual steps in correct order (always run in logical sequence)
+    [[ "$STEP_PARTITION" == true ]] && {
+        msg "Step 1: Partitioning device..."
+        "$SCRIPT_DIR/01_partition.sh" || exit 1
+        msg "✓ Partitioning completed"
+        echo
+    }
+    [[ "$STEP_FORMAT" == true ]] && {
+        msg "Step 2: Formatting partitions..."
+        "$SCRIPT_DIR/02_format.sh" $([[ "$FORCE" == true ]] && echo "--force") || exit 1
+        msg "✓ Formatting completed"
+        echo
+    }
+    [[ "$STEP_MOUNT" == true ]] && {
+        msg "Step 3: Mounting partitions..."
+        "$SCRIPT_DIR/03_mount.sh" || exit 1
+        msg "✓ Partitions mounted at $MOUNT_ROOT"
+        echo
+    }
+    [[ "$STEP_BASE_SYSTEM" == true ]] && {
+        msg "Step 4: Installing base system..."
+        install_base_system || exit 1
+        msg "✓ Base system installation completed"
+        echo
+    }
+    [[ "$STEP_CONFIGURE" == true ]] && {
+        msg "Step 5: Configuring system..."
+        configure_system || exit 1
+        msg "✓ System configuration completed"
+        echo
+    }
+    [[ "$STEP_BOOTLOADER" == true ]] && {
+        msg "Step 6: Setting up bootloader..."
+        setup_bootloader || exit 1
+        msg "✓ Bootloader setup completed"
+        echo
+    }
+    [[ "$STEP_INITRAMFS" == true ]] && {
+        msg "Step 7: Generating initramfs..."
+        generate_initramfs || exit 1
+        msg "✓ Initramfs generation completed"
+        echo
+    }
+    [[ "$STEP_CONFIGURE_PACMAN" == true ]] && {
+        msg "Step 8: Configuring pacman and repositories..."
+        setup_pacman_and_repos || exit 1
+        msg "✓ Pacman and repositories configuration completed"
+        echo
+    }
+    [[ "$STEP_PACKAGES" == true ]] && {
+        msg "Step 9: Installing packages..."
+        install_packages || exit 1
+        msg "✓ Package installation completed"
+        echo
+    }
+    [[ "$STEP_GROUPS" == true ]] && {
+        msg "Step 10: Configuring groups..."
+        configure_groups || exit 1
+        msg "✓ Group configuration completed"
+        echo
+    }
+    [[ "$STEP_USERS" == true ]] && {
+        msg "Step 11: Configuring users..."
+        configure_users || exit 1
+        msg "✓ User configuration completed"
+        echo
+    }
+    [[ "$STEP_SANITY" == true ]] && {
+        msg "Step 12: Performing sanity check..."
+        perform_sanity_check || exit 1
+        msg "✓ Sanity check completed"
+        echo
+    }
+
+    msg "All selected steps completed successfully!"
+else
+    msg "Starting Arch Linux installation..."
+
+    # Step 1: Partition the device
+    step_begin "Step 1: Partitioning device" "partition"
+    "$SCRIPT_DIR/01_partition.sh" || {
+        err "Partitioning failed"
+        exit 1
+    }
+    step_complete "Step 1: Partitioning device"
+
+    # Step 2: Format partitions
+    step_begin "Step 2: Formatting partitions" "format"
+    "$SCRIPT_DIR/02_format.sh" $([[ "$FORCE" == true ]] && echo "--force") || {
+        err "Formatting failed"
+        exit 1
+    }
+    step_complete "Step 2: Formatting partitions"
+
+    # Step 3: Mount partitions
+    step_begin "Step 3: Mounting partitions" "mount"
+    "$SCRIPT_DIR/03_mount.sh" || {
+        err "Mounting failed"
+        exit 1
+    }
+    step_complete "Step 3: Mounting partitions"
+
+    # Step 4: Install base system
+    step_begin "Step 4: Installing base system" "base-system"
+    install_base_system || exit 1
+    step_complete "Step 4: Installing base system"
+
+    # Step 5: Configure system
+    step_begin "Step 5: Configuring system" "configure"
+    configure_system || exit 1
+    step_complete "Step 5: Configuring system"
+
+    # Step 6: Setup bootloader
+    step_begin "Step 6: Setting up bootloader" "bootloader"
+    setup_bootloader || exit 1
+    step_complete "Step 6: Setting up bootloader"
+
+    # Step 7: Generate initramfs
+    step_begin "Step 7: Generating initramfs" "initramfs"
+    generate_initramfs || exit 1
+    step_complete "Step 7: Generating initramfs"
+
+    # Step 8: Configure pacman and repositories
+    step_begin "Step 8: Configuring pacman and repositories" "configure-pacman"
+    setup_pacman_and_repos || exit 1
+    step_complete "Step 8: Configuring pacman and repositories"
+
+    # Step 9: Install packages
+    step_begin "Step 9: Installing packages" "packages"
+    install_packages || exit 1
+    step_complete "Step 9: Installing packages"
+
+    # Step 10: Configure groups
+    step_begin "Step 10: Configuring groups" "groups"
+    configure_groups || exit 1
+    step_complete "Step 10: Configuring groups"
+
+    # Step 11: Configure users
+    step_begin "Step 11: Configuring users" "users"
+    configure_users || exit 1
+    step_complete "Step 11: Configuring users"
+
+    # Step 12: Sanity check
+    step_begin "Step 12: Performing sanity check" "sanity"
+    perform_sanity_check || exit 1
+    step_complete "Step 12: Performing sanity check"
+fi
+
+# Final cleanup of any remaining bind mounts
+cleanup_repository_bind_mounts 2> /dev/null || true
+
+# Final sync to ensure all data is written to disk
+msg "Performing final sync to ensure all data is written to disk..."
+sync
+sleep 2
+
+# Additional sync for good measure
+sync
+msg "All data synced to disk"
+
+# Ask user if they want to unmount (only for successful full installation)
+if [[ "$ANY_STEP_FLAG" != true ]]; then
+    ask_unmount
+fi
+
+msg "Arch Linux installation completed successfully!"
+msg "System features:"
+msg "  - Hostname: $HOSTNAME"
+msg "  - Users: root (custom password), jesusa (custom password, sudo access)"
+msg "  - Default shell: fish"
+msg "  - Services enabled: NetworkManager, sshd, gdm"
+msg "  - Repository configured with NFS mounts and custom package cache"
+echo
+msg "The system is ready to boot. Remove installation media and reboot."
+msg "Installation log saved to: $PWD/$LOG_FILE"

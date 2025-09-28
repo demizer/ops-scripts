@@ -275,3 +275,4 @@ else
     echo "Package installation failed" >&2
     exit 1
 fi
+nano ghostty
