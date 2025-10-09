@@ -718,7 +718,7 @@ EOF
     cat > "$MOUNT_ROOT/etc/hosts" << 'EOF'
 127.0.0.1   localhost
 ::1         localhost
-127.0.1.1   jesusa-fridge.localdomain jesusa-fridge
+127.0.1.1   jesusa-fridge.alvaone.net jesusa-fridge
 EOF
 
     msg "System configured successfully"
