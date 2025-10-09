@@ -518,8 +518,7 @@ vim.opt.rtp:prepend(lazypath)
 -- Check for lazy-lock.json file for dependency locking
 local function check_lockfile()
     local lockfile_paths = {
-        vim.fn.expand("~/.config/nvim/lazy-lock.json"),
-        "/mnt/backups/ops-scripts/lazy-lock.json"
+        "/mnt/backups/ops-scripts/dotfiles/neovim-lazy-lock.json"
     }
 
     for _, path in ipairs(lockfile_paths) do
@@ -561,6 +560,25 @@ local function copy_and_restore_lockfile(source_path)
     return target_lockfile
 end
 
+local function should_restore_lockfile(source_path, target_path)
+    -- Always restore on fresh install (no target lockfile exists)
+    if vim.fn.filereadable(target_path) == 0 then
+        return true, "fresh install"
+    end
+
+    -- Check if source is newer than target
+    local source_stat = vim.loop.fs_stat(source_path)
+    local target_stat = vim.loop.fs_stat(target_path)
+
+    if source_stat and target_stat then
+        if source_stat.mtime.sec > target_stat.mtime.sec then
+            return true, "source lockfile is newer"
+        end
+    end
+
+    return false, "target lockfile is up to date"
+end
+
 local lockfile_result = check_lockfile()
 if lockfile_result == nil then
     return
@@ -570,13 +588,47 @@ local lockfile_path = nil
 local should_restore = false
 
 if lockfile_result then
-    -- Found a lockfile, copy it to the right location and prepare for restore
-    lockfile_path = copy_and_restore_lockfile(lockfile_result)
-    should_restore = true
+    local nvim_config_path = vim.fn.expand("~/.config/nvim")
+    local target_lockfile = nvim_config_path .. "/lazy-lock.json"
+
+    local should_restore_result, reason = should_restore_lockfile(lockfile_result, target_lockfile)
+
+    if should_restore_result then
+        if reason == "fresh install" then
+            -- Fresh install - just copy and restore
+            lockfile_path = copy_and_restore_lockfile(lockfile_result)
+            should_restore = true
+            vim.notify("Fresh install detected - will restore from lockfile", vim.log.levels.INFO)
+        else
+            -- Source is newer - ask user
+            vim.notify("Source lockfile is newer than current lockfile", vim.log.levels.WARN)
+            vim.notify("Source: " .. lockfile_result, vim.log.levels.INFO)
+            vim.notify("Target: " .. target_lockfile, vim.log.levels.INFO)
+
+            local choice = vim.fn.input("Would you like to restore from the newer lockfile? (y/N): ")
+            if choice:lower() == "y" or choice:lower() == "yes" then
+                lockfile_path = copy_and_restore_lockfile(lockfile_result)
+                should_restore = true
+                vim.notify("Will restore from newer lockfile", vim.log.levels.INFO)
+            else
+                -- Use existing target lockfile
+                lockfile_path = target_lockfile
+                should_restore = false
+                vim.notify("Keeping current lockfile", vim.log.levels.INFO)
+            end
+        end
+    else
+        -- Target is up to date - use it without restoring
+        lockfile_path = target_lockfile
+        should_restore = false
+    end
 else
     -- User chose to proceed without lockfile
     lockfile_path = nil
 end
+
+-- Add dotmanager plugin
+vim.opt.runtimepath:append("/mnt/backups/ops-scripts/nvim-dotmanager")
 
 -- Your CodeCompanion setup
 local plugins = {

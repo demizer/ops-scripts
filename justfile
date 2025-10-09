@@ -56,18 +56,18 @@ full-audit: audit fix-scripts
 # Dotfiles Management
 # ============================================================================
 
-# Install dotfiles using setup-dotfiles.lua
+# Install dotfiles using setup-dotfiles.py
 dotfiles-install:
-    nvim -l setup-dotfiles.lua
+    uv run ./setup-dotfiles.py
 
 # Dry run dotfiles installation (preview changes without applying)
 dotfiles-preview:
-    nvim -l setup-dotfiles.lua -n
+    uv run ./setup-dotfiles.py -d -n
 
-# Install dotfiles with debug output
-dotfiles-debug:
-    nvim -l setup-dotfiles.lua -d
+# Sync changes from home directory back to dotfiles
+dotfiles-sync:
+    uv run ./setup-dotfiles.py -s
 
 # Show help for dotfiles setup script
 dotfiles-help:
-    nvim -l setup-dotfiles.lua -h
+    uv run ./setup-dotfiles.py -h
