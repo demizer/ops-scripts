@@ -1,0 +1,121 @@
+# Keep connections alive!
+Host *
+    TCPKeepAlive yes
+    ServerAliveInterval 120
+    ServerAliveCountMax 20
+    LogLevel ERROR
+    AddKeysToAgent yes
+
+Host gitlab-master.nvidia.com
+    IdentityFile ~/.ssh/jesusa-lt-2024-11-17
+
+Host *.km.nvidia.com
+  User jesusa
+  ForwardAgent yes
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+
+Host 192.168.5.*
+    User jesusa
+    PreferredAuthentications password
+    IdentityFile ~/.ssh/id_ed25519_homey_the_key_2024-05-17
+
+Host github.com
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+
+Host router
+    User root
+    HostName router.alvaone.net
+    Port 45125
+    ForwardAgent yes
+    IdentityFile ~/.ssh/id_ed25519_homey_the_key_2024-05-17
+
+Host home
+    User demizer
+    HostName alvaone.net
+    Port 42565
+    ForwardAgent yes
+    IdentityFile ~/.ssh/id_ed25519_homey_the_key_2024-05-17
+
+Host homelocal elysium
+    User demizer
+    HostName 192.168.5.10
+    Port 22
+    ForwardAgent yes
+    IdentityFile ~/.ssh/id_ed25519_homey_the_key_2024-05-17
+
+Host gitlab.com
+    HostName gitlab.com
+    User git
+    IdentityFile ~/.ssh/jesusa-lt-2024-11-17
+    IdentitiesOnly yes
+
+Host cia-tf-*
+    Port 22
+    User kitmakerconf
+    IdentityFile ~/.ssh/id_ed25519
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+
+Host shipit-prod
+    HostName shipit.nvidia.com
+    Port 22
+    User svc-compute-packagin
+    IdentityFile ~/.ssh/jesusa-lt-2024-11-17
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+
+
+# If you want an alias for convenience
+Host kitmaker-prod-master
+    HostName cia-tf-rocky9-jenkins-master-1.client.nvidia.com
+    Port 22
+    User kitmakerconf
+    IdentityFile ~/.ssh/id_ed25519
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+
+# kitmaker prod agent centos7 01
+Host kitmaker-prod-agent-centos7-01
+    HostName cia-jenkins-agent-01.nvidia.com
+
+# kitmaker prod agent ubuntu1604 01
+Host kitmaker-prod-agent-ubuntu1604-02
+    HostName cia-jenkins-agent-02.nvidia.com
+
+Host kitmaker-prod-agent-centos* kitmaker-prod-agent-ubuntu*
+    User jesusa
+    Port 22
+    IdentityFile ~/.ssh/id_rsa_cia_infra
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+
+# kitmaker prod agent windows 2016r2 01
+Host kitmaker-prod-agent-windows-01
+    HostName rnnvcijenkins01.nvidia.com
+
+# kitmaker prod agent windows 2016r2 02
+Host kitmaker-prod-agent-windows-02
+    HostName rnnvcijenkins02.nvidia.com
+
+Host kitmaker-prod-agent-windows-*
+    User svc-compute-packagin
+    Port 22
+    IdentityFile ~/.ssh/id_rsa_jenkins_slave
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+
+Host *.dyn.nvidia.com
+    RequestTTY force
+    LocalForward 8250 localhost:8250
+    RemoteForward 2489 localhost:2489
+
+Host kitmaker-dev
+    User jesusa
+    HostName jesusa-desktop.dyn.nvidia.com
+    Port 12345
+    IdentityFile ~/.ssh/id_rsa
+    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking no
+    ServerAliveInterval  180
+    ServerAliveCountMax 20

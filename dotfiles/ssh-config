@@ -1,0 +1,69 @@
+# Keep connections alive!
+Host *
+    TCPKeepAlive yes
+    ServerAliveInterval 120
+    ServerAliveCountMax 3
+    AddKeysToAgent yes
+    RemoteForward 2489 localhost:2489
+
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    IdentitiesOnly yes
+
+Host lithium neon
+    User demizer
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    # Port 42565
+    ForwardAgent yes
+
+Host nas
+    User admin
+    Hostname nas.alvaone.net
+    IdentityFile ~/.ssh/id_ed25519_alvaone_2025-09-06
+    PreferredAuthentications publickey
+    ForwardAgent yes
+
+Host *.alvaone.net
+    User demizer
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    # Port 42565
+    ForwardAgent yes
+
+Host helium
+    User jesusa
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    ForwardAgent yes
+
+Host home
+    User demizer
+    Hostname alvaone.net
+    Port 42565
+    ForwardAgent yes
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+
+Host router
+    User root
+    Port 42565
+    Hostname 192.168.5.1
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    ForwardAgent yes
+
+Host wap
+    User root
+    Hostname 192.168.5.52
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    ForwardAgent yes
+    Port 42565
+
+Host wap2
+    User root
+    Hostname 192.168.5.53
+    IdentityFile ~/.ssh/id_rsa_demizer_alvaone_2015-04-12
+    ForwardAgent yes
+    Port 42565
+
+Host aur.archlinux.org
+    User aur
+    IdentityFile ~/.ssh/id_rsa_aur_2016-08-14

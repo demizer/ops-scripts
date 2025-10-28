@@ -327,6 +327,29 @@ def setup_kitty_dotfiles() -> None:
     ensure_copy(DOTFILES_DIR / "kitty.conf", kitty_config_dir / "kitty.conf")
 
 
+def setup_ssh_dotfiles() -> None:
+    """Setup SSH dotfiles"""
+    log.info("[bold blue]Setup SSH config[/]")
+    home = Path.home()
+    ssh_dir = home / ".ssh"
+    ensure_dir_exists(ssh_dir)
+
+    ssh_config = ssh_dir / "config"
+
+    if is_work_host(SETUP_HOST):
+        log.info("[bold blue]Setup SSH config[/] [yellow](work)[/]")
+        ensure_copy(DOTFILES_DIR / "ssh-config-work", ssh_config)
+    else:
+        log.info("[bold blue]Setup SSH config[/]")
+        ensure_copy(DOTFILES_DIR / "ssh-config", ssh_config)
+
+    # Set appropriate permissions
+    if not DRY_RUN:
+        ssh_config.chmod(0o600)
+    else:
+        log.warning(f"[yellow]NORUN:[/] [dim]chmod 600 '{ssh_config}'[/]")
+
+
 def setup_tmux_dotfiles() -> None:
     """Setup tmux dotfiles"""
     log.info("[bold blue]Setup tmux.conf[/]")
@@ -411,6 +434,8 @@ def sync_dotfiles_back() -> None:
         (home / ".pypi.rc", DOTFILES_DIR / "pypi.rc", "pypi.rc"),
         (home / ".config" / "language-server.json", DOTFILES_DIR / "language-server.json", "language-server.json"),
         (home / ".msmtprc", DOTFILES_DIR / "msmtprc", "msmtprc"),
+        (home / ".ssh" / "config", DOTFILES_DIR / "ssh-config", "ssh config"),
+        (home / ".ssh" / "config", DOTFILES_DIR / "ssh-config-work", "ssh config-work"),
         (home / ".config" / "fish" / "config.fish", DOTFILES_DIR / "fish-config.fish", "fish config.fish"),
         (home / ".config" / "fish" / "config-linux.fish", DOTFILES_DIR / "fish-config-linux.fish", "fish config-linux.fish"),
         (home / ".config" / "kitty" / "kitty.conf", DOTFILES_DIR / "kitty.conf", "kitty.conf"),
@@ -474,17 +499,20 @@ def main() -> None:
         if SETUP_HOST == "jump.km.nvidia.com":
             # Jump host setup
             setup_general_dotfiles()
+            setup_ssh_dotfiles()
             setup_neovim_dotfiles()
             setup_fish_dotfiles()
         elif WORK_LT in SETUP_HOST:
             # Work laptop setup
             setup_general_dotfiles()
+            setup_ssh_dotfiles()
             setup_neovim_dotfiles()
             setup_fish_dotfiles()
             setup_kitty_dotfiles()
         else:
             # Personal setup
             setup_general_dotfiles()
+            setup_ssh_dotfiles()
             setup_neovim_dotfiles()
             setup_fish_dotfiles()
             setup_kitty_dotfiles()
