@@ -241,14 +241,21 @@ deploy:
 
 # Monitor serial output from the device
 monitor:
-    @echo "📺 Monitoring device output..."
-    @echo "   Press Ctrl+A then K to exit screen"
-    @echo "   Or Ctrl+C to exit Python serial monitor"
-    @echo ""
-    @if command -v screen >/dev/null 2>&1; then \
-        screen {{DEVICE_PATH}} 115200; \
-    else \
-        python -m serial.tools.miniterm {{DEVICE_PATH}} 115200; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📺 Monitoring device output..."
+    echo "   Press Ctrl+A then K to exit screen"
+    echo "   Or Ctrl+C to exit Python serial monitor"
+    echo ""
+
+    DEVICE=$(./find-tinyc6.sh)
+    echo "Device found at: $DEVICE"
+    echo ""
+
+    if command -v screen >/dev/null 2>&1; then
+        screen "$DEVICE" 115200
+    else
+        uv run python -m serial.tools.miniterm "$DEVICE" 115200
     fi
 
 # Check if device is connected
@@ -275,13 +282,20 @@ check-device:
 
 # Reset the device
 reset:
-    @echo "🔄 Resetting device..."
-    @if command -v stty >/dev/null 2>&1; then \
-        stty -F {{DEVICE_PATH}} 1200; \
-        sleep 2; \
-        echo "✅ Reset signal sent"; \
-    else \
-        echo "❌ stty not available, please press RESET button manually"; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔄 Resetting device..."
+
+    DEVICE=$(./find-tinyc6.sh)
+    echo "Device found at: $DEVICE"
+
+    if command -v stty >/dev/null 2>&1; then
+        stty -F "$DEVICE" 1200
+        sleep 2
+        echo "✅ Reset signal sent"
+    else
+        echo "❌ stty not available, please press RESET button manually"
+        exit 1
     fi
 
 # Clean up generated files on device
@@ -331,6 +345,11 @@ info:
 dev:
     just deploy
     just monitor
+
+# Open Thonny IDE for CircuitPython development
+thonny:
+    @echo "🐍 Opening Thonny IDE..."
+    source .venv/bin/activate && thonny &
 
 # Emergency: force reset and clean
 emergency:
