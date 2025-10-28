@@ -1,360 +1,228 @@
-# TinyC6 ESP32-S3 CircuitPython Justfile
-# Easy commands for flashing and managing the device
+# TinyC6 ESP32-C6 ESP-IDF Justfile
+# Zigbee Coordinator with Web Interface
 
 # Default device path (adjust if needed)
 DEVICE_PATH := "/dev/ttyACM0"
-MOUNT_PATH := "/media/CIRCUITPY"
 
 # List all available commands
 default:
     @just --list
 
-# Generate dependency lockfile
-uv-lock:
-    uv lock
-
-# Install development dependencies
-install-deps:
-    uv venv --clear
-    uv sync --all-extras --locked
-
-# Install required CircuitPython libraries
-install-libs:
+# Set ESP-IDF target to ESP32-C6 (run once after cloning)
+set-target:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "📚 Installing CircuitPython libraries..."
-    echo "Device type: JTAG-only (no USB mount)"
-    DEVICE=$(./find-tinyc6.sh)
-
-    # Create local library staging directory
-    mkdir -p .circuitpy-libs/lib
-
-    # Download CircuitPython bundle if not present
-    if [ ! -d ".circuitpy-libs/bundle" ]; then
-        echo "Fetching latest bundle URL..."
-        BUNDLE_URL=$(curl -sL "https://api.github.com/repos/adafruit/Adafruit_CircuitPython_Bundle/releases/latest" | grep "browser_download_url.*9.x.*mpy.*\.zip" | head -1 | cut -d'"' -f4)
-
-        if [ -z "$BUNDLE_URL" ]; then
-            echo "ERROR: Could not find bundle download URL"
-            exit 1
-        fi
-
-        echo "Downloading CircuitPython library bundle from: $BUNDLE_URL"
-        curl -L -o .circuitpy-libs/bundle.zip "$BUNDLE_URL"
-
-        if [ $? -ne 0 ]; then
-            echo "ERROR: Failed to download bundle"
-            exit 1
-        fi
-
-        echo "Extracting bundle..."
-        unzip -q .circuitpy-libs/bundle.zip -d .circuitpy-libs/
-        mv .circuitpy-libs/adafruit-circuitpython-bundle-* .circuitpy-libs/bundle
-        rm .circuitpy-libs/bundle.zip
-        echo "Bundle extracted successfully"
-    else
-        echo "Using cached bundle"
+    if ! command -v idf.py &> /dev/null; then \
+        echo "❌ ERROR: idf.py not found!"; \
+        echo ""; \
+        echo "Please source ESP-IDF environment first:"; \
+        echo "  . \$HOME/esp/esp-idf/export.sh"; \
+        echo "  OR"; \
+        echo "  . /opt/esp-idf/export.sh"; \
+        echo ""; \
+        echo "Then run: just set-target"; \
+        exit 1; \
     fi
+    echo "🎯 Setting target to ESP32-C6..."
+    idf.py set-target esp32c6
+    echo "✅ Target set! Now run: just menuconfig (to set WiFi credentials)"
 
-    # Copy required libraries
-    echo "Copying libraries to staging area..."
-    cp -r .circuitpy-libs/bundle/lib/adafruit_displayio_ssd1306* .circuitpy-libs/lib/ || echo "Warning: adafruit_displayio_ssd1306 not found"
-    cp -r .circuitpy-libs/bundle/lib/adafruit_display_text* .circuitpy-libs/lib/ || echo "Warning: adafruit_display_text not found"
-    cp -r .circuitpy-libs/bundle/lib/adafruit_framebuf* .circuitpy-libs/lib/ || echo "Warning: adafruit_framebuf not found"
+# Set up ESP-IDF environment and install dependencies
+setup:
+    @echo "🔧 Setting up ESP-IDF environment..."
+    @echo "Make sure you have ESP-IDF installed and sourced:"
+    @echo "  . $HOME/esp/esp-idf/export.sh"
+    @echo "  OR"
+    @echo "  . /opt/esp-idf/export.sh"
+    @echo ""
+    @echo "After sourcing, run: just set-target"
+    @echo ""
+    @echo "Or install ESP-IDF:"
+    @echo "  https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/"
 
-    echo "✅ Libraries downloaded to .circuitpy-libs/lib/"
-    ls -la .circuitpy-libs/lib/
-    echo ""
-    echo "📤 Transferring libraries to device at $DEVICE..."
-    echo ""
-    echo "⚠️  If transfer hangs or fails, put device in REPL mode:"
-    echo "   Option 1: Press and release the BOOT button on the device"
-    echo "   Option 2: Connect via serial (just monitor) and press Ctrl+C"
-    echo ""
-    read -p "Press Enter when ready to continue..."
-    echo ""
-
-    # Try to enter REPL by sending Ctrl+C
-    echo "Attempting to enter REPL mode..."
-    printf "\x03\x03" > "$DEVICE" 2>/dev/null || true
-    sleep 1
-
-    # Count total items
-    total=$(ls -1 .circuitpy-libs/lib/ | wc -l)
-    current=0
-
-    # Ensure /lib directory exists on device
-    echo "Creating /lib directory on device..."
-    uv run ampy --port "$DEVICE" --delay 1 mkdir /lib 2>/dev/null || echo "  /lib already exists (OK)"
-
-    # Transfer each library file/directory using ampy
-    for item in .circuitpy-libs/lib/*; do
-        current=$((current + 1))
-        basename=$(basename "$item")
-
-        # Remove old version if it exists
-        echo "  [$current/$total] Removing old $basename (if exists)..."
-        uv run ampy --port "$DEVICE" --delay 1 rm "/lib/$basename" 2>/dev/null || true
-
-        if [ -d "$item" ]; then
-            file_count=$(find "$item" -type f | wc -l)
-            echo "  [$current/$total] Uploading directory $basename ($file_count files)..."
-
-            # Create the directory on the device first
-            uv run ampy --port "$DEVICE" --delay 1 mkdir "/lib/$basename" 2>/dev/null || true
-
-            # Upload each file in the directory individually
-            find "$item" -type f | while read file; do
-                relative_path=$(echo "$file" | sed "s|$item/||")
-                remote_path="/lib/$basename/$relative_path"
-                remote_dir=$(dirname "$remote_path")
-
-                # Create subdirectory if needed
-                if [ "$remote_dir" != "/lib/$basename" ]; then
-                    uv run ampy --port "$DEVICE" --delay 1 mkdir "$remote_dir" 2>/dev/null || true
-                fi
-
-                echo "    Uploading $relative_path..."
-                uv run ampy --port "$DEVICE" --delay 1 put "$file" "$remote_path" 2>&1 | grep -v "SyntaxWarning" | grep -v "invalid escape sequence" || true
-
-                if [ ${PIPESTATUS[0]} -ne 0 ]; then
-                    echo "ERROR: Failed to upload $relative_path"
-                    exit 1
-                fi
-            done
-        else
-            size=$(du -h "$item" | cut -f1)
-            echo "  [$current/$total] Uploading $basename ($size)..."
-            uv run ampy --port "$DEVICE" --delay 1 put "$item" "/lib/$basename" 2>&1 | grep -v "SyntaxWarning" | grep -v "invalid escape sequence" || true
-
-            if [ ${PIPESTATUS[0]} -ne 0 ]; then
-                echo "ERROR: Failed to upload $basename"
-                exit 1
-            fi
-        fi
-
-        echo "    ✓ Done"
-    done
-
-    echo ""
-    echo "✅ All libraries transferred successfully!"
-
-# Run all code quality checks (format, lint, type check)
-audit:
-    uv run ruff format .
-    uv run ruff check --fix .
-    uv run mypy .
-
-# Flash CircuitPython firmware to TinyC6 via serial
-flash firmware_bin:
+# Configure the project (IMPORTANT: set WiFi SSID and password here!)
+menuconfig:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "📥 Flashing CircuitPython firmware to TinyC6..."
+    echo "⚙️  Opening ESP-IDF configuration menu..."
+    echo ""
+    echo "📡 IMPORTANT: Configure WiFi credentials!"
+    echo "   Navigate to: Zigbee Halloween Controller Configuration"
+    echo "   Set: WiFi SSID"
+    echo "   Set: WiFi Password"
+    echo ""
+    echo "   Press 'S' to save, 'Q' to quit"
+    echo ""
+    read -p "Press Enter to open menuconfig..."
+    idf.py menuconfig
 
-    # Check if firmware file exists
-    if [ ! -f "{{firmware_bin}}" ]; then
-        echo "ERROR: Firmware file not found: {{firmware_bin}}"
-        exit 1
+# Build the project
+build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v idf.py &> /dev/null; then \
+        echo "❌ ERROR: idf.py not found!"; \
+        echo ""; \
+        echo "Please source ESP-IDF environment first:"; \
+        echo "  . \$HOME/esp/esp-idf/export.sh"; \
+        echo "  OR"; \
+        echo "  . /opt/esp-idf/export.sh"; \
+        exit 1; \
     fi
 
-    DEVICE=$(./find-tinyc6.sh)
-    echo "Device found at: $DEVICE"
+    # Check if target is set correctly
+    if [ ! -f sdkconfig ]; then \
+        echo "❌ ERROR: sdkconfig not found!"; \
+        echo ""; \
+        echo "Please run: just set-target"; \
+        echo "This will configure the project for ESP32-C6"; \
+        exit 1; \
+    fi
+
+    if grep -q "CONFIG_IDF_TARGET=\"esp32\"" sdkconfig 2>/dev/null; then \
+        echo "❌ ERROR: Target is set to esp32, but should be esp32c6!"; \
+        echo ""; \
+        echo "Please run: just set-target"; \
+        echo "This will reconfigure for ESP32-C6"; \
+        exit 1; \
+    fi
+
+    echo "🔨 Building project..."
+    idf.py build
+
+# Clean build artifacts
+clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧹 Cleaning build artifacts..."
+    idf.py fullclean
+
+# Flash firmware to device
+flash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📥 Flashing firmware to TinyC6 ESP32-C6..."
     echo ""
     echo "⚠️  Put device in bootloader mode:"
     echo "   1. Hold BOOT button"
     echo "   2. Press and release RESET button"
     echo "   3. Release BOOT button"
     echo ""
-    read -p "Press Enter when device is in bootloader mode..."
+    read -p "Press Enter when ready to flash..."
     echo ""
+    echo "⏳ Waiting for device in bootloader mode..."
 
-    echo "🔥 Erasing flash..."
-    uv run esptool.py --chip esp32c6 --port "$DEVICE" erase_flash
+    # Poll for device with timeout
+    TIMEOUT=10
+    ELAPSED=0
+    while [ $ELAPSED -lt $TIMEOUT ]; do
+        if DEVICE=$(./find-tinyc6.sh 2>/dev/null); then
+            echo "✓ Device found at: $DEVICE"
+            echo ""
+            idf.py -p "$DEVICE" flash
+            exit 0
+        fi
+        sleep 0.5
+        ELAPSED=$((ELAPSED + 1))
+    done
 
-    if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to erase flash"
-        exit 1
-    fi
+    echo "❌ Timeout: Device not found after ${TIMEOUT} seconds"
+    exit 1
 
-    echo ""
-    echo "📤 Writing firmware..."
-    uv run esptool.py --chip esp32c6 --port "$DEVICE" --baud 460800 write_flash -z 0x0 "{{firmware_bin}}"
-
-    if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to write firmware"
-        exit 1
-    fi
-
-    echo ""
-    echo "✅ Firmware flashed successfully!"
-    echo "🔄 Device will restart automatically"
-    echo ""
-    echo "💡 Next steps:"
-    echo "   1. Wait for device to boot (~5 seconds)"
-    echo "   2. Run: just install-libs"
-    echo "   3. Run: just deploy"
-
-# Deploy code.py to the device via serial
-deploy:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📄 Deploying code.py to device..."
-
-    if [ ! -f "code.py" ]; then
-        echo "ERROR: code.py not found"
-        exit 1
-    fi
-
-    DEVICE=$(./find-tinyc6.sh)
-    echo "Device found at: $DEVICE"
-    echo ""
-    echo "⚠️  Put device in REPL mode:"
-    echo "   Press and hold the BOOT button for 1 second, then release"
-    echo ""
-    read -p "Press Enter when ready to continue..."
-    echo ""
-
-    # Try to enter REPL
-    echo "Attempting to enter REPL mode..."
-    printf "\x03\x03" > "$DEVICE" 2>/dev/null || true
-    sleep 1
-
-    # Upload code.py
-    echo "Uploading code.py..."
-    uv run ampy --port "$DEVICE" --delay 1 put code.py /code.py 2>&1 | grep -v "SyntaxWarning" | grep -v "invalid escape sequence" || true
-
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
-        echo "ERROR: Failed to upload code.py"
-        exit 1
-    fi
-
-    echo "✅ Code deployed successfully!"
-    echo ""
-    echo "🔄 Restarting device..."
-    # Send Ctrl+D to soft reboot the device
-    printf "\x04" > "$DEVICE" 2>/dev/null || true
-    sleep 2
-
-    echo "✅ Device restarted!"
-    echo ""
-    echo "💡 Monitor output with: just monitor"
-
-# Monitor serial output from the device
+# Monitor serial output from device
 monitor:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📺 Monitoring device output..."
-    echo "   Press Ctrl+A then K to exit screen"
-    echo "   Or Ctrl+C to exit Python serial monitor"
+    echo "   Press Ctrl+] to exit"
+    echo "   To reset: Ctrl+T then Ctrl+R"
     echo ""
 
     DEVICE=$(./find-tinyc6.sh)
     echo "Device found at: $DEVICE"
     echo ""
+    echo "💡 TIP: Use Ctrl+T then Ctrl+R to reset device (don't use physical button)"
+    echo ""
 
-    if command -v screen >/dev/null 2>&1; then
-        screen "$DEVICE" 115200
-    else
-        uv run python -m serial.tools.miniterm "$DEVICE" 115200
-    fi
+    idf.py -p "$DEVICE" monitor
+
+# Build and flash in one command
+flash-monitor: build flash monitor
+
+# Erase flash completely
+erase:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔥 Erasing flash memory..."
+
+    DEVICE=$(./find-tinyc6.sh)
+    echo "Device found at: $DEVICE"
+    echo ""
+    echo "⚠️  This will erase ALL data on the device!"
+    read -p "Press Enter to continue or Ctrl+C to cancel..."
+    echo ""
+
+    idf.py -p "$DEVICE" erase-flash
 
 # Check if device is connected
 check-device:
     @echo "🔍 Checking for connected device..."
-    @if [ -c "{{DEVICE_PATH}}" ]; then \
-        echo "✅ Device found at {{DEVICE_PATH}}"; \
-        ls -la {{DEVICE_PATH}}; \
-    else \
-        echo "❌ No device found at {{DEVICE_PATH}}"; \
-        echo "   Try these paths:"; \
-        ls -la /dev/ttyACM* 2>/dev/null || echo "   No /dev/ttyACM* devices"; \
-        ls -la /dev/ttyUSB* 2>/dev/null || echo "   No /dev/ttyUSB* devices"; \
-    fi
-    @echo ""
-    @if [ -d "{{MOUNT_PATH}}" ]; then \
-        echo "✅ CircuitPython drive found at {{MOUNT_PATH}}"; \
-        ls -la "{{MOUNT_PATH}}/"; \
-    else \
-        echo "❌ CircuitPython drive not found at {{MOUNT_PATH}}"; \
-        echo "   Try these mount points:"; \
-        ls -la /media/ 2>/dev/null | grep CIRCUIT || echo "   No CIRCUITPY drives found"; \
-    fi
-
-# Reset the device
-reset:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🔄 Resetting device..."
-
-    DEVICE=$(./find-tinyc6.sh)
-    echo "Device found at: $DEVICE"
-
-    if command -v stty >/dev/null 2>&1; then
-        stty -F "$DEVICE" 1200
-        sleep 2
-        echo "✅ Reset signal sent"
-    else
-        echo "❌ stty not available, please press RESET button manually"
-        exit 1
-    fi
-
-# Clean up generated files on device
-clean:
-    @echo "🧹 Cleaning up device files..."
-    @if [ -d "{{MOUNT_PATH}}" ]; then \
-        rm -f "{{MOUNT_PATH}}/pir_motion_test_start.txt"; \
-        rm -f "{{MOUNT_PATH}}/pir_motion_test_end.txt"; \
-        echo "✅ Cleanup complete"; \
-    else \
-        echo "❌ Device not mounted at {{MOUNT_PATH}}"; \
-    fi
-
-# Complete setup: flash firmware, install libs, deploy code
-setup:
-    @echo "🚀 Complete TinyC6 setup..."
-    @echo ""
-    @echo "Step 1: Flash CircuitPython firmware"
-    just flash-circuitpython
-    @echo ""
-    @echo "Press Enter when CircuitPython is installed and device has restarted..."
-    @read dummy
-    @echo ""
-    @echo "Step 2: Install libraries"
-    just install-libs
-    @echo ""
-    @echo "Step 3: Deploy code"
-    just deploy
-    @echo ""
-    @echo "Step 4: Monitor output"
-    just monitor
+    @./find-tinyc6.sh && echo "✅ Device found!" || echo "❌ Device not found"
 
 # Show device information
 info:
-    @echo "📊 TinyC6 PIR Motion Sensor Project"
-    @echo "=================================="
-    @echo "Device: TinyC6 ESP32-S3"
-    @echo "PIR Sensor: Pin IO18"
-    @echo "OLED: I2C on IO6(SDA)/IO7(SCL)"
-    @echo "NeoPixel: Built-in"
-    @echo "Battery: VBAT monitoring"
-    @echo "USB Detection: GPIO10"
+    @echo "📊 TinyC6 Zigbee Halloween Controller"
+    @echo "========================================"
+    @echo "Device: TinyC6 ESP32-C6"
+    @echo "Framework: ESP-IDF"
+    @echo "Chip: ESP32-C6 (RISC-V)"
+    @echo "Role: Zigbee Coordinator"
+    @echo "Features:"
+    @echo "  - WiFi web interface"
+    @echo "  - NTP time sync (LA timezone)"
+    @echo "  - PIR motion detection"
+    @echo "  - OLED status display"
+    @echo "  - Controls 2 Zigbee end devices"
     @echo ""
-    just check-device
+    @just check-device
 
-# Development workflow: deploy code and monitor
-dev:
-    just deploy
-    just monitor
+# Development workflow: build, flash, and monitor
+dev: build flash monitor
 
-# Open Thonny IDE for CircuitPython development
-thonny:
-    @echo "🐍 Opening Thonny IDE..."
-    source .venv/bin/activate && thonny &
+# Show app size information
+size:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📏 Analyzing app size..."
+    idf.py size
 
-# Emergency: force reset and clean
-emergency:
-    @echo "🚨 Emergency reset and clean..."
-    just reset
-    sleep 3
-    just clean
-    @echo "✅ Emergency procedures complete"
+# Show partition table
+show-partitions:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "💾 Partition table:"
+    idf.py partition-table
+
+# Quick setup guide
+help:
+    @echo "🎃 Zigbee Halloween Controller - Quick Start Guide"
+    @echo "===================================================="
+    @echo ""
+    @echo "1️⃣  First time setup:"
+    @echo "   just set-target       # Configure for ESP32-C6"
+    @echo "   just menuconfig       # Set WiFi credentials!"
+    @echo "                         # Go to: Zigbee Halloween Controller Configuration"
+    @echo ""
+    @echo "2️⃣  Build and flash:"
+    @echo "   just build           # Compile the firmware"
+    @echo "   just flash           # Upload to device"
+    @echo "   just monitor         # View serial output"
+    @echo ""
+    @echo "3️⃣  Or do it all at once:"
+    @echo "   just dev             # Build + flash + monitor"
+    @echo ""
+    @echo "4️⃣  Access web interface:"
+    @echo "   After flashing, check serial monitor for IP address"
+    @echo "   Open http://<device-ip>/ in your browser"
+    @echo ""
+    @echo "📚 More commands: just --list"

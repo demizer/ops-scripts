@@ -1,0 +1,23 @@
+# Python cache
+.pytest_cache/
+__pycache__/
+
+# ESP-IDF build outputs
+build/
+build_*_*/
+sdkconfig
+sdkconfig.old
+
+# Component manager
+managed_components/
+dependencies.lock
+
+# CI/CD outputs
+build_summary_*.xml
+app_info_*.txt
+size_info_*.txt
+pytest_embedded_log/
+
+# IDE files
+.vscode/
+.idea/
