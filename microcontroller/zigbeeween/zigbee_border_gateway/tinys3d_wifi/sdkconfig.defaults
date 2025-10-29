@@ -1,0 +1,13 @@
+# Flash size for TinyS3 (UnexpectedMaker ESP32-S3)
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# LWIP settings for web server
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Enable ICMP (ping) support
+CONFIG_LWIP_ICMP=y
+
+# Partition table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

@@ -1,0 +1,264 @@
+# Zigbee Border Gateway - Unified Justfile
+# Controls both TinyS3 (WiFi) and XIAO C6 (Zigbee) devices
+
+# Directories
+TINYS3_DIR := "tinys3d_wifi"
+XIAOC6_DIR := "xiaoc6_zigbee"
+
+# List all available commands
+default:
+    @just --list
+
+# ============================================================================
+# Unified Commands (Both Devices)
+# ============================================================================
+
+# Build both firmwares
+build:
+    @echo "🔨 Building both firmwares..."
+    @echo ""
+    @echo "▶ Building TinyS3 (ESP32-S3 WiFi/HTTP controller)..."
+    cd {{TINYS3_DIR}} && idf.py build
+    @echo ""
+    @echo "▶ Building XIAO C6 (ESP32-C6 Zigbee coordinator)..."
+    cd {{XIAOC6_DIR}} && idf.py build
+    @echo ""
+    @echo "✅ Both firmwares built successfully!"
+
+# Flash both devices
+flash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📥 Flashing both devices..."
+    echo ""
+    echo "▶ Flashing TinyS3..."
+    TINYS3_PORT=$({{justfile_directory()}}/find-tinys3d.sh)
+    cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p "$TINYS3_PORT" flash
+    echo ""
+    echo "▶ Flashing XIAO C6..."
+    XIAOC6_PORT=$({{justfile_directory()}}/find-xiaoc6.sh)
+    cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p "$XIAOC6_PORT" flash
+    echo ""
+    echo "✅ Both devices flashed successfully!"
+
+# Development workflow: build and flash both devices
+dev: build flash
+    @echo ""
+    @echo "✅ Development workflow complete!"
+    @echo ""
+    @echo "To monitor devices:"
+    @echo "   just monitor-tinys3   # Monitor TinyS3"
+    @echo "   just monitor-xiaoc6   # Monitor XIAO C6"
+
+# Clean both projects
+clean:
+    @echo "🧹 Cleaning both projects..."
+    cd {{TINYS3_DIR}} && idf.py fullclean
+    cd {{XIAOC6_DIR}} && idf.py fullclean
+    @echo "✅ Clean complete!"
+
+# Erase flash on both devices
+erase:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔥 Erasing flash on both devices..."
+    echo ""
+    echo "▶ Erasing TinyS3..."
+    TINYS3_PORT=$({{justfile_directory()}}/find-tinys3d.sh)
+    cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p "$TINYS3_PORT" erase-flash
+    echo ""
+    echo "▶ Erasing XIAO C6..."
+    XIAOC6_PORT=$({{justfile_directory()}}/find-xiaoc6.sh)
+    cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p "$XIAOC6_PORT" erase-flash
+    echo ""
+    echo "✅ Flash erased on both devices!"
+
+# ============================================================================
+# TinyS3 (ESP32-S3 WiFi/HTTP Controller) Commands
+# ============================================================================
+
+# Build TinyS3 firmware only
+build-tinys3:
+    @echo "🔨 Building TinyS3 firmware..."
+    cd {{TINYS3_DIR}} && idf.py build
+
+# Flash TinyS3 only
+flash-tinys3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📥 Flashing TinyS3..."
+    TINYS3_PORT=$({{justfile_directory()}}/find-tinys3d.sh)
+    cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p "$TINYS3_PORT" flash
+
+# Monitor TinyS3 only
+monitor-tinys3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📺 Monitoring TinyS3..."
+    echo "Connect TinyS3 via USB and press Enter..."
+    read -r
+    # Find first available serial device
+    DEVICE=$(ls -1 /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1 || true)
+    if [ -z "$DEVICE" ]; then
+        echo "❌ Error: No USB serial device found"
+        echo "   Check that device is connected"
+        exit 1
+    fi
+    echo "✓ Using device: $DEVICE"
+    cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p "$DEVICE" monitor
+
+# TinyS3 development workflow
+dev-tinys3: build-tinys3 flash-tinys3 monitor-tinys3
+
+# Configure TinyS3 (set WiFi credentials)
+menuconfig-tinys3:
+    @echo "⚙️  Configuring TinyS3..."
+    @echo "📡 Set WiFi SSID and password"
+    cd {{TINYS3_DIR}} && idf.py menuconfig
+
+# Set TinyS3 target (one-time setup)
+set-target-tinys3:
+    @echo "🎯 Setting TinyS3 target to ESP32-S3..."
+    cd {{TINYS3_DIR}} && idf.py set-target esp32s3
+    @echo "✅ Target set! Run: just menuconfig-tinys3 (to set WiFi)"
+
+# ============================================================================
+# XIAO C6 (ESP32-C6 Zigbee Coordinator) Commands
+# ============================================================================
+
+# Build XIAO C6 firmware only
+build-xiaoc6:
+    @echo "🔨 Building XIAO C6 firmware..."
+    cd {{XIAOC6_DIR}} && idf.py build
+
+# Flash XIAO C6 only
+flash-xiaoc6:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📥 Flashing XIAO C6..."
+    XIAOC6_PORT=$({{justfile_directory()}}/find-xiaoc6.sh)
+    cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p "$XIAOC6_PORT" flash
+
+# Monitor XIAO C6 only
+monitor-xiaoc6:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📺 Monitoring XIAO C6..."
+    echo "Connect XIAO C6 via USB and press Enter..."
+    read -r
+    # Find first available serial device
+    DEVICE=$(ls -1 /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1 || true)
+    if [ -z "$DEVICE" ]; then
+        echo "❌ Error: No USB serial device found"
+        echo "   Check that device is connected"
+        exit 1
+    fi
+    echo "✓ Using device: $DEVICE"
+    cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p "$DEVICE" monitor
+
+# XIAO C6 development workflow
+dev-xiaoc6: build-xiaoc6 flash-xiaoc6 monitor-xiaoc6
+
+# Configure XIAO C6 (optional)
+menuconfig-xiaoc6:
+    @echo "⚙️  Configuring XIAO C6..."
+    cd {{XIAOC6_DIR}} && idf.py menuconfig
+
+# Set XIAO C6 target (one-time setup)
+set-target-xiaoc6:
+    @echo "🎯 Setting XIAO C6 target to ESP32-C6..."
+    cd {{XIAOC6_DIR}} && idf.py set-target esp32c6
+    @echo "✅ Target set!"
+
+# ============================================================================
+# Information & Setup
+# ============================================================================
+
+# Check if devices are connected
+check:
+    @echo "🔍 Checking for connected devices..."
+    @echo ""
+    @echo "Looking for any USB serial devices:"
+    @ls -1 /dev/ttyACM* /dev/ttyUSB* 2>/dev/null || echo "  ❌ No serial devices found"
+    @echo ""
+    @echo "Note: Use ./find-tinys3d.sh or ./find-xiaoc6.sh to identify specific devices"
+
+# Show system information
+info:
+    @echo "📊 Zigbee Border Gateway System"
+    @echo "═══════════════════════════════════════════════"
+    @echo ""
+    @echo "🌐 TinyS3 ESP32-S3 (WiFi/HTTP Controller)"
+    @echo "   Role: WiFi gateway, HTTP server, PIR sensor, OLED display"
+    @echo "   Features:"
+    @echo "     - WiFi connectivity"
+    @echo "     - Web interface for manual triggering"
+    @echo "     - NTP time sync"
+    @echo "     - PIR motion detection"
+    @echo "     - 128x32 OLED status display"
+    @echo "     - UART TX to XIAO C6 (GPIO43)"
+    @echo ""
+    @echo "📡 XIAO C6 ESP32-C6 (Zigbee Coordinator)"
+    @echo "   Role: Zigbee coordinator (Zigbee-only)"
+    @echo "   Features:"
+    @echo "     - Zigbee coordinator on channel 15"
+    @echo "     - Controls 2 Zigbee end devices"
+    @echo "     - UART RX from TinyS3 (GPIO17/D7)"
+    @echo "     - Time sync via UART"
+    @echo ""
+    @echo "🔌 UART Wiring:"
+    @echo "   TinyS3 TX (GPIO43) → XIAO C6 RX (GPIO17/D7)"
+    @echo "   TinyS3 RX (GPIO44) → XIAO C6 TX (GPIO16/D6)"
+    @echo "   Common ground required"
+    @echo ""
+    @just check
+
+# First-time setup guide
+setup:
+    @echo "🎃 Zigbee Border Gateway - First Time Setup"
+    @echo "═══════════════════════════════════════════════"
+    @echo ""
+    @echo "1️⃣  Set targets (one-time):"
+    @echo "   just set-target-tinys3"
+    @echo "   just set-target-xiaoc6"
+    @echo ""
+    @echo "2️⃣  Configure WiFi (TinyS3 only):"
+    @echo "   just menuconfig-tinys3"
+    @echo "   (Set WiFi SSID and password)"
+    @echo ""
+    @echo "3️⃣  Build and flash both devices:"
+    @echo "   just dev"
+    @echo "   (Builds both, flashes sequentially with same USB cable)"
+    @echo "   You'll be prompted to connect each device one at a time"
+    @echo ""
+    @echo "4️⃣  Wire up UART connection:"
+    @echo "   TinyS3 TX (GPIO43) → XIAO C6 RX (GPIO17/D7)"
+    @echo "   TinyS3 RX (GPIO44) → XIAO C6 TX (GPIO16/D6)"
+    @echo "   Connect grounds"
+    @echo ""
+    @echo "5️⃣  Access web interface:"
+    @echo "   Check TinyS3 monitor for IP address"
+    @echo "   Open http://<ip>/ in browser"
+
+# Quick help
+help:
+    @echo "🎃 Zigbee Border Gateway - Quick Reference"
+    @echo "═══════════════════════════════════════════════"
+    @echo ""
+    @echo "🚀 Main Commands:"
+    @echo "   just dev              # Build and flash both devices"
+    @echo "   just build            # Build both firmwares"
+    @echo "   just flash            # Flash both devices (sequential with 1 USB cable)"
+    @echo ""
+    @echo "📱 Individual Device Commands:"
+    @echo "   just dev-tinys3       # Build, flash, monitor TinyS3"
+    @echo "   just dev-xiaoc6       # Build, flash, monitor XIAO C6"
+    @echo "   just monitor-tinys3   # Monitor TinyS3 only"
+    @echo "   just monitor-xiaoc6   # Monitor XIAO C6 only"
+    @echo ""
+    @echo "ℹ️  Information:"
+    @echo "   just info             # Show system info"
+    @echo "   just check            # Check device connections"
+    @echo "   just setup            # First-time setup guide"
+    @echo ""
+    @echo "📚 Full command list: just --list"

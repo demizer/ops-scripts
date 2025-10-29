@@ -1,0 +1,15 @@
+menu "TinyS3 WiFi Controller Configuration"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "alvaone"
+        help
+            SSID (network name) for the WiFi network to connect to.
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            WiFi password (WPA or WPA2) for the network.
+
+endmenu
