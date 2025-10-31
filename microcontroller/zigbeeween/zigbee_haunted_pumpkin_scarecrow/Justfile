@@ -1,0 +1,108 @@
+# Xiao ESP32-C6 ESP-IDF Justfile
+# Easy commands for building and flashing the device
+
+# List all available commands
+default:
+	@just --list
+
+# Internal: Source ESP-IDF environment if needed
+_source_esp_idf:
+	#!/usr/bin/env fish
+	if not type -q idf.py
+		echo "ESP-IDF not found in PATH, sourcing environment..."
+		echo "Run: 'source /opt/esp-idf/export.fish'"
+		exit 1
+	end
+
+# Set ESP-IDF target to ESP32-C6 (run once after cloning)
+set-target: _source_esp_idf
+	#!/usr/bin/env fish
+	if test -d "build"
+		echo ">>> Deleting build cache"
+		rm -rf build
+	end
+	echo ">>> Setting target to ESP32-C6..."
+	idf.py set-target esp32c6
+	echo ">>> Target set! Now run: just build"
+
+# Configure the project (run menuconfig)
+menuconfig: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Opening ESP-IDF configuration menu..."
+	idf.py menuconfig
+
+# Build the project
+build: _source_esp_idf
+	#!/usr/bin/env fish
+	# Check if target is set correctly
+	if not test -f sdkconfig
+		echo "Target not configured, setting to ESP32-C6..."
+		rm -rf build
+		if not idf.py set-target esp32c6
+			echo "Failed to set target"
+			exit 1
+		end
+	else if not grep -q 'CONFIG_IDF_TARGET="esp32c6"' sdkconfig
+		echo "Wrong target detected, setting to ESP32-C6..."
+		rm -rf build
+		if not idf.py set-target esp32c6
+			echo "Failed to set target"
+			exit 1
+		end
+	end
+	echo "Building project..."
+	idf.py build
+
+# Clean build artifacts
+clean: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Cleaning build artifacts..."
+	idf.py fullclean
+
+# Flash firmware to device (REQUIRED: just flash /dev/ttyACM0)
+flash PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Flashing firmware to Xiao ESP32-C6..."
+	echo ">>> Using port: {{PORT}}"
+	echo ">>> Bootloader mode handled automatically - NO button pressing needed!"
+	echo ""
+
+	idf.py -p {{PORT}} flash
+
+# Monitor serial output from device (REQUIRED: just monitor /dev/ttyACM0)
+monitor PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Monitoring device output..."
+	echo ">>> Using port: {{PORT}}"
+	echo ">>> Press Ctrl+] to exit"
+	echo ""
+
+	idf.py -p {{PORT}} monitor
+
+# Build and flash in one command
+flash-monitor: build flash monitor
+
+# Erase flash completely (REQUIRED: just erase /dev/ttyACM0)
+erase PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Erasing flash memory..."
+	echo ">>> Using port: {{PORT}}"
+	echo ">>> This will erase ALL data on the device!"
+	echo ""
+
+	idf.py -p {{PORT}} erase-flash
+
+# Development workflow: build, flash, and monitor
+dev: build flash monitor
+
+# Show app size information
+size: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Analyzing app size..."
+	idf.py size
+
+# Show partition table
+show-partitions: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Partition table:"
+	idf.py partition-table
