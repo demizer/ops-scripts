@@ -1,134 +1,108 @@
 # Xiao ESP32-C6 ESP-IDF Justfile
 # Easy commands for building and flashing the device
 
-# Default device path (adjust if needed)
-DEVICE_PATH := "/dev/ttyACM0"
-
 # List all available commands
 default:
     @just --list
 
-# Set ESP-IDF target to ESP32-C6 (run once after cloning)
-set-target:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🎯 Setting target to ESP32-C6..."
-    idf.py set-target esp32c6
-    echo "✅ Target set! Now run: just build"
+# Internal: Source ESP-IDF environment if needed
+_source_esp_idf:
+	#!/usr/bin/env fish
+	if not type -q idf.py
+		echo "ESP-IDF not found in PATH, sourcing environment..."
+		echo "Run: 'source /opt/esp-idf/export.fish'"
+		exit 1
+	end
 
-# Set up ESP-IDF environment and install dependencies
-setup:
-    @echo "🔧 Setting up ESP-IDF environment..."
-    @echo "Make sure you have ESP-IDF installed and sourced:"
-    @echo "  . $HOME/esp/esp-idf/export.sh"
-    @echo "  OR"
-    @echo "  . /opt/esp-idf/export.sh"
-    @echo ""
-    @echo "After sourcing, run: just set-target"
-    @echo ""
-    @echo "Or install ESP-IDF:"
-    @echo "  https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/"
+# Set ESP-IDF target to ESP32-C6 (run once after cloning)
+set-target: _source_esp_idf
+	#!/usr/bin/env fish
+	if test -d "build"
+		echo ">>> Deleting build cache"
+		rm -rf build
+	end
+	echo ">>> Setting target to ESP32-C6..."
+	idf.py set-target esp32c6
+	echo ">>> Target set! Now run: just build"
 
 # Configure the project (run menuconfig)
-menuconfig:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "⚙️  Opening ESP-IDF configuration menu..."
-    idf.py menuconfig
+menuconfig: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Opening ESP-IDF configuration menu..."
+	idf.py menuconfig
 
 # Build the project
-build:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🔨 Building project..."
-    idf.py build
+build: _source_esp_idf
+	#!/usr/bin/env fish
+	# Check if target is set correctly
+	if not test -f sdkconfig
+		echo "Target not configured, setting to ESP32-C6..."
+		rm -rf build
+		if not idf.py set-target esp32c6
+			echo "Failed to set target"
+			exit 1
+		end
+	else if not grep -q 'CONFIG_IDF_TARGET="esp32c6"' sdkconfig
+		echo "Wrong target detected, setting to ESP32-C6..."
+		rm -rf build
+		if not idf.py set-target esp32c6
+			echo "Failed to set target"
+			exit 1
+		end
+	end
+	echo "Building project..."
+	idf.py build
 
 # Clean build artifacts
-clean:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🧹 Cleaning build artifacts..."
-    idf.py fullclean
+clean: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Cleaning build artifacts..."
+	idf.py fullclean
 
-# Flash firmware to device
-flash:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📥 Flashing firmware to Xiao ESP32-C6..."
+# Flash firmware to device (REQUIRED: just flash /dev/ttyACM0)
+flash PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Flashing firmware to Xiao ESP32-C6..."
+	echo ">>> Using port: {{PORT}}"
+	echo ">>> Bootloader mode handled automatically - NO button pressing needed!"
+	echo ""
 
-    DEVICE=$(./find-xiao-esp32c6.sh)
-    echo "Device found at: $DEVICE"
-    echo ""
-    echo "⚠️  Put device in bootloader mode (tiny buttons next to USB-C):"
-    echo "   1. Press and hold BOOT button"
-    echo "   2. While holding BOOT, press RESET once and release"
-    echo "   3. Release BOOT button"
-    echo ""
-    read -p "Press Enter when ready to flash..."
-    echo ""
+	idf.py -p {{PORT}} flash
 
-    idf.py -p "$DEVICE" flash
+# Monitor serial output from device (REQUIRED: just monitor /dev/ttyACM0)
+monitor PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Monitoring device output..."
+	echo ">>> Using port: {{PORT}}"
+	echo ">>> Press Ctrl+] to exit"
+	echo ""
 
-# Monitor serial output from device
-monitor:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📺 Monitoring device output..."
-    echo "   Press Ctrl+] to exit"
-    echo ""
-
-    DEVICE=$(./find-xiao-esp32c6.sh)
-    echo "Device found at: $DEVICE"
-    echo ""
-
-    idf.py -p "$DEVICE" monitor
+	idf.py -p {{PORT}} monitor
 
 # Build and flash in one command
 flash-monitor: build flash monitor
 
-# Erase flash completely
-erase:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🔥 Erasing flash memory..."
+# Erase flash completely (REQUIRED: just erase /dev/ttyACM0)
+erase PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Erasing flash memory..."
+	echo ">>> Using port: {{PORT}}"
+	echo ">>> This will erase ALL data on the device!"
+	echo ""
 
-    DEVICE=$(./find-xiao-esp32c6.sh)
-    echo "Device found at: $DEVICE"
-    echo ""
-    echo "⚠️  This will erase ALL data on the device!"
-    read -p "Press Enter to continue or Ctrl+C to cancel..."
-    echo ""
-
-    idf.py -p "$DEVICE" erase-flash
-
-# Check if device is connected
-check-device:
-    @echo "🔍 Checking for connected device..."
-    @./find-xiao-esp32c6.sh && echo "✅ Device found!" || echo "❌ Device not found"
-
-# Show device information
-info:
-    @echo "📊 Xiao ESP32-C6 RIP Tombstone Project"
-    @echo "===================================="
-    @echo "Device: Seeed Studio Xiao ESP32-C6"
-    @echo "Framework: ESP-IDF"
-    @echo "Chip: ESP32-C6 (RISC-V)"
-    @echo ""
-    @just check-device
+	idf.py -p {{PORT}} erase-flash
 
 # Development workflow: build, flash, and monitor
 dev: build flash monitor
 
 # Show app size information
-size:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📏 Analyzing app size..."
-    idf.py size
+size: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Analyzing app size..."
+	idf.py size
 
 # Show partition table
-show-partitions:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "💾 Partition table:"
-    idf.py partition-table
+show-partitions: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Partition table:"
+	idf.py partition-table

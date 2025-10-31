@@ -50,17 +50,51 @@ ESP-IDF project for the Seeed Studio Xiao ESP32-C6 microcontroller.
    just monitor
    ```
 
+## Flashing and Development Workflow
+
+### Standard Build and Flash Sequence
+```bash
+# 1. Clean build artifacts
+just clean
+
+# 2. Erase flash completely
+just erase rip
+
+# 3. Build the project
+just build
+
+# 4. Flash to device (NO button pressing required!)
+just flash rip
+
+# 5. Monitor serial output
+just monitor rip
+```
+
+### Quick Rebuild (no sdkconfig changes)
+If you're just modifying code and haven't changed `sdkconfig.defaults`:
+- In monitor: Press `Control+T` then `Control+F` to rebuild and flash
+- Much faster than full clean build
+
+### When to Use Full Clean Build
+You MUST do a full clean build when:
+- Changing `sdkconfig.defaults` settings
+- Running `menuconfig` and modifying options
+- Build errors that seem unrelated to code changes
+- After updating managed components
+
+**Important**: The XIAO ESP32-C6 buttons are tiny, but the Justfile automatically handles bootloader mode - no button pressing needed!
+
 ## Available Commands
 
 Run `just` to see all available commands:
 
 - `just build` - Build the project
-- `just flash` - Flash firmware to device
-- `just monitor` - Monitor serial output
+- `just flash rip` - Flash firmware to device (auto bootloader mode)
+- `just monitor rip` - Monitor serial output
 - `just dev` - Build, flash, and monitor in one command
 - `just menuconfig` - Configure project settings
 - `just clean` - Clean build artifacts
-- `just erase` - Erase flash completely
+- `just erase rip` - Erase flash completely
 - `just check-device` - Check if device is connected
 - `just info` - Show device information
 
