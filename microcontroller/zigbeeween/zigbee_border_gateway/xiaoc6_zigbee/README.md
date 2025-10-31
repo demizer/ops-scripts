@@ -131,6 +131,40 @@ I (12345) zigbee_controller: Got IP: 192.168.1.100
 
 Open your browser to: `http://192.168.1.100/`
 
+## Flashing and Development Workflow
+
+### Standard Build and Flash Sequence
+```bash
+# 1. Clean build artifacts
+just clean
+
+# 2. Erase flash completely
+just erase coord
+
+# 3. Build the project
+just build
+
+# 4. Flash to device (NO button pressing required!)
+just flash coord
+
+# 5. Monitor serial output
+just monitor coord
+```
+
+### Quick Rebuild (no sdkconfig changes)
+If you're just modifying code and haven't changed `sdkconfig.defaults`:
+- In monitor: Press `Control+T` then `Control+F` to rebuild and flash
+- Much faster than full clean build
+
+### When to Use Full Clean Build
+You MUST do a full clean build when:
+- Changing `sdkconfig.defaults` settings
+- Running `menuconfig` and modifying options
+- Build errors that seem unrelated to code changes
+- After updating managed components
+
+**Important**: The XIAO ESP32-C6 buttons are tiny, but the Justfile automatically handles bootloader mode - no button pressing needed!
+
 ## Available Commands
 
 Run `just` or `just --list` to see all commands:
@@ -138,11 +172,11 @@ Run `just` or `just --list` to see all commands:
 - `just set-target` - Configure for ESP32-C6 (one-time)
 - `just menuconfig` - Configure WiFi and settings
 - `just build` - Build the firmware
-- `just flash` - Flash firmware to device
-- `just monitor` - Monitor serial output
+- `just flash coord` - Flash firmware to device (auto bootloader mode)
+- `just monitor coord` - Monitor serial output
 - `just dev` - Build, flash, and monitor in one command
 - `just clean` - Clean build artifacts
-- `just erase` - Erase flash completely
+- `just erase coord` - Erase flash completely
 - `just check-device` - Check if device is connected
 - `just info` - Show project information
 - `just help` - Show quick start guide

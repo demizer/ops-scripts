@@ -62,10 +62,12 @@ static int wifi_rssi = 0;
 typedef struct {
     char name[32];
     bool is_connected;
+    bool time_synced;
+    bool in_cooldown;
 } zigbee_device_t;
 
-static zigbee_device_t rip_tombstone = {"RIP Tombstone", false};
-static zigbee_device_t halloween_trigger = {"Halloween Trigger", false};
+static zigbee_device_t rip_tombstone = {"RIP Tombstone", false, false, false};
+static zigbee_device_t halloween_trigger = {"Haunted Pumpkin Scarecrow", false, false, false};
 
 // UART command protocol
 #define CMD_TRIGGER_RIP 0x01
@@ -74,6 +76,71 @@ static zigbee_device_t halloween_trigger = {"Halloween Trigger", false};
 #define CMD_STATUS_REQUEST 0x10
 #define CMD_STATUS_RESPONSE 0x11
 #define CMD_TIME_SYNC 0x20
+#define CMD_DEVICE_JOINED 0x30
+#define CMD_DEVICE_LEFT 0x31
+
+// Event logging
+#define MAX_EVENTS 50
+typedef enum {
+    EVENT_MOTION_DETECTED,
+    EVENT_MOTION_STOPPED,
+    EVENT_TRIGGER_RIP,
+    EVENT_TRIGGER_HALLOWEEN,
+    EVENT_TRIGGER_BOTH,
+    EVENT_DEVICE_JOINED,
+    EVENT_DEVICE_LEFT
+} event_type_t;
+
+typedef struct {
+    time_t timestamp;
+    event_type_t type;
+    char device_name[32];  // For join/leave events
+} event_log_t;
+
+static event_log_t event_log[MAX_EVENTS];
+static int event_log_head = 0;
+static int event_log_count = 0;
+
+// ============================================================================
+// Event Logging
+// ============================================================================
+
+void log_event(event_type_t type, const char *device_name)
+{
+    event_log[event_log_head].timestamp = time(NULL);
+    event_log[event_log_head].type = type;
+
+    if (device_name) {
+        strncpy(event_log[event_log_head].device_name, device_name, sizeof(event_log[event_log_head].device_name) - 1);
+        event_log[event_log_head].device_name[sizeof(event_log[event_log_head].device_name) - 1] = '\0';
+    } else {
+        event_log[event_log_head].device_name[0] = '\0';
+    }
+
+    event_log_head = (event_log_head + 1) % MAX_EVENTS;
+    if (event_log_count < MAX_EVENTS) {
+        event_log_count++;
+    }
+
+    // Log to console
+    const char *event_name;
+    switch (type) {
+        case EVENT_MOTION_DETECTED: event_name = "Motion Detected"; break;
+        case EVENT_MOTION_STOPPED: event_name = "Motion Stopped"; break;
+        case EVENT_TRIGGER_RIP: event_name = "Trigger RIP"; break;
+        case EVENT_TRIGGER_HALLOWEEN: event_name = "Trigger Pumpkin Scarecrow"; break;
+        case EVENT_TRIGGER_BOTH: event_name = "Trigger Both"; break;
+        case EVENT_DEVICE_JOINED: event_name = "Device Joined"; break;
+        case EVENT_DEVICE_LEFT: event_name = "Device Left"; break;
+        default: event_name = "Unknown"; break;
+    }
+
+    if (device_name) {
+        ESP_LOGI(TAG, "Event logged: %s - %s", event_name, device_name);
+    } else {
+        ESP_LOGI(TAG, "Event logged: %s", event_name);
+    }
+}
 
 // ============================================================================
 // I2C and OLED Functions
@@ -529,22 +596,37 @@ void uart_request_status(void)
     uart_send_command(CMD_STATUS_REQUEST);
 }
 
+// Task to request status updates every 3 seconds
+void status_request_task(void *pvParameters)
+{
+    // Wait 2 seconds before first request
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    while (1) {
+        uart_request_status();
+        vTaskDelay(pdMS_TO_TICKS(3000));  // Request every 3 seconds
+    }
+}
+
 void trigger_rip_tombstone_uart(void)
 {
     ESP_LOGI(TAG, "Triggering RIP Tombstone via UART");
     uart_send_command(CMD_TRIGGER_RIP);
+    log_event(EVENT_TRIGGER_RIP, NULL);
 }
 
 void trigger_halloween_decoration_uart(void)
 {
-    ESP_LOGI(TAG, "Triggering Halloween Decoration via UART");
+    ESP_LOGI(TAG, "Triggering Haunted Pumpkin Scarecrow via UART");
     uart_send_command(CMD_TRIGGER_HALLOWEEN);
+    log_event(EVENT_TRIGGER_HALLOWEEN, NULL);
 }
 
 void trigger_both_uart(void)
 {
     ESP_LOGI(TAG, "Triggering BOTH devices via UART");
     uart_send_command(CMD_TRIGGER_BOTH);
+    log_event(EVENT_TRIGGER_BOTH, NULL);
 }
 
 void uart_send_time_sync(void)
@@ -575,6 +657,75 @@ void uart_send_time_sync(void)
     char time_str[64];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
     ESP_LOGI(TAG, "   Time: %s", time_str);
+}
+
+// ============================================================================
+// UART Receiver Task (for status updates from XIAO C6)
+// ============================================================================
+
+void uart_receiver_task(void *pvParameters)
+{
+    uint8_t data[16];
+
+    ESP_LOGI(TAG, "UART receiver task started");
+
+    while (1) {
+        int len = uart_read_bytes(UART_NUM, data, sizeof(data), pdMS_TO_TICKS(100));
+
+        if (len > 0) {
+            // Look for status response frame: 0xAA CMD_STATUS_RESPONSE flags(2 bytes) 0x55
+            for (int i = 0; i < len - 4; i++) {
+                if (data[i] == 0xAA && data[i + 1] == CMD_STATUS_RESPONSE && data[i + 4] == 0x55) {
+                    uint16_t flags = ((uint16_t)data[i + 2] << 8) | data[i + 3];
+
+                    // Parse flags
+                    bool rip_time_synced = (flags & (1 << 0)) != 0;
+                    bool halloween_time_synced = (flags & (1 << 1)) != 0;
+                    bool rip_connected = (flags & (1 << 2)) != 0;
+                    bool halloween_connected = (flags & (1 << 3)) != 0;
+                    bool rip_cooldown = (flags & (1 << 4)) != 0;
+                    bool halloween_cooldown = (flags & (1 << 5)) != 0;
+
+                    // Update device status
+                    rip_tombstone.time_synced = rip_time_synced;
+                    rip_tombstone.is_connected = rip_connected;
+                    rip_tombstone.in_cooldown = rip_cooldown;
+                    halloween_trigger.time_synced = halloween_time_synced;
+                    halloween_trigger.is_connected = halloween_connected;
+                    halloween_trigger.in_cooldown = halloween_cooldown;
+
+                    ESP_LOGI(TAG, "Device status updated: RIP[%s/%s/%s] Halloween[%s/%s/%s]",
+                             rip_connected ? "✓" : "✗",
+                             rip_time_synced ? "✓" : "✗",
+                             rip_cooldown ? "COOL" : "RDY",
+                             halloween_connected ? "✓" : "✗",
+                             halloween_time_synced ? "✓" : "✗",
+                             halloween_cooldown ? "COOL" : "RDY");
+                }
+            }
+
+            // Look for device join/leave notifications: 0xAA CMD device_id(1 byte) 0x55
+            // device_id: 1 = RIP, 2 = Halloween
+            for (int i = 0; i < len - 3; i++) {
+                if (data[i] == 0xAA && data[i + 3] == 0x55) {
+                    uint8_t cmd = data[i + 1];
+                    uint8_t device_id = data[i + 2];
+
+                    if (cmd == CMD_DEVICE_JOINED) {
+                        const char *device_name = (device_id == 1) ? "RIP Tombstone" :
+                                                 (device_id == 2) ? "Haunted Pumpkin Scarecrow" : "Unknown";
+                        ESP_LOGI(TAG, "Device joined: %s", device_name);
+                        log_event(EVENT_DEVICE_JOINED, device_name);
+                    } else if (cmd == CMD_DEVICE_LEFT) {
+                        const char *device_name = (device_id == 1) ? "RIP Tombstone" :
+                                                 (device_id == 2) ? "Haunted Pumpkin Scarecrow" : "Unknown";
+                        ESP_LOGI(TAG, "Device left: %s", device_name);
+                        log_event(EVENT_DEVICE_LEFT, device_name);
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -849,6 +1000,7 @@ static esp_err_t root_handler(httpd_req_t *req)
         "body{font-family:Arial;background:#1a1a1a;color:#fff;padding:20px;text-align:center}"
         "h1{color:#ff6b00}h2{color:#ff8c00}"
         ".status{background:#2a2a2a;padding:15px;margin:20px 0;border-radius:10px}"
+        ".status p{margin:8px 0}"
         ".button{background:#ff6b00;color:#fff;border:none;padding:15px 30px;font-size:18px;"
         "margin:10px;border-radius:5px;cursor:pointer;min-width:200px}"
         ".button:hover{background:#ff8c00}"
@@ -856,6 +1008,14 @@ static esp_err_t root_handler(httpd_req_t *req)
         ".motion{color:#00ff00;font-weight:bold}"
         ".time{color:#88aaff;font-size:14px}"
         ".arch{color:#888;font-size:12px;margin-top:20px}"
+        "#rip-status b,#halloween-status b{font-size:16px}"
+        ".events{background:#2a2a2a;padding:15px;margin:20px 0;border-radius:10px;max-height:300px;overflow-y:auto;text-align:left}"
+        ".events h3{text-align:center;margin-top:0;color:#ff8c00}"
+        ".event{padding:5px 0;border-bottom:1px solid #444;font-size:13px}"
+        ".event:last-child{border-bottom:none}"
+        ".event-time{color:#88aaff;margin-right:10px}"
+        ".event-type{color:#ffa500}"
+        ".event-device{color:#aaa;margin-left:5px}"
         "</style></head><body>"
         "<h1>🎃 Zigbee Halloween Controller 🎃</h1>"
         "<div class='status'>");
@@ -864,31 +1024,72 @@ static esp_err_t root_handler(httpd_req_t *req)
     snprintf(buf, sizeof(buf), "<p class='time'>%s</p>", time_str);
     httpd_resp_sendstr_chunk(req, buf);
 
-    snprintf(buf, sizeof(buf), "<p>PIR Motion: <span class='motion'>%s</span></p>",
+    snprintf(buf, sizeof(buf), "<p>PIR Motion: <span class='motion' id='motion-status'>%s</span></p>",
              pir_motion_detected ? "DETECTED" : "None");
     httpd_resp_sendstr_chunk(req, buf);
 
-    snprintf(buf, sizeof(buf), "<p>RIP Tombstone: %s</p>",
-             rip_tombstone.is_connected ? "Connected" : "Not connected");
+    snprintf(buf, sizeof(buf), "<p id='rip-status'>RIP Tombstone: %s | Time: %s | <b>%s</b></p>",
+             rip_tombstone.is_connected ? "✓ Connected" : "✗ Not connected",
+             rip_tombstone.time_synced ? "✓ Synced" : "✗ Not synced",
+             rip_tombstone.in_cooldown ? "COOLDOWN" : "READY");
     httpd_resp_sendstr_chunk(req, buf);
 
-    snprintf(buf, sizeof(buf), "<p>Halloween Trigger: %s</p>",
-             halloween_trigger.is_connected ? "Connected" : "Not connected");
+    snprintf(buf, sizeof(buf), "<p id='halloween-status'>Haunted Pumpkin Scarecrow: %s | Time: %s | <b>%s</b></p>",
+             halloween_trigger.is_connected ? "✓ Connected" : "✗ Not connected",
+             halloween_trigger.time_synced ? "✓ Synced" : "✗ Not synced",
+             halloween_trigger.in_cooldown ? "COOLDOWN" : "READY");
     httpd_resp_sendstr_chunk(req, buf);
 
     httpd_resp_sendstr_chunk(req,
+        "</div>"
+        "<div class='events'>"
+        "<h3>Event Log</h3>"
+        "<div id='event-log'></div>"
         "</div>"
         "<h2>Manual Control</h2>"
         "<form method='POST' action='/trigger/rip'>"
         "<button class='button' type='submit'>🪦 Trigger RIP Tombstone</button>"
         "</form>"
         "<form method='POST' action='/trigger/halloween'>"
-        "<button class='button' type='submit'>🎃 Trigger Halloween</button>"
+        "<button class='button' type='submit'>🎃 Trigger Pumpkin Scarecrow</button>"
         "</form>"
         "<form method='POST' action='/trigger/both'>"
         "<button class='button' type='submit'>👻 Trigger BOTH</button>"
         "</form>"
         "<p class='arch'>TinyS3 (ESP32-S3) + XIAO C6 (Zigbee) via UART</p>"
+        "<script>"
+        "function getEventLabel(type){"
+            "const labels={'motion_detected':'🟢 Motion Detected','motion_stopped':'⚫ Motion Stopped',"
+            "'trigger_rip':'🪦 Trigger RIP','trigger_halloween':'🎃 Trigger Pumpkin Scarecrow',"
+            "'trigger_both':'👻 Trigger Both','device_joined':'✓ Device Joined','device_left':'✗ Device Left'};"
+            "return labels[type]||type;"
+        "}"
+        "function updateStatus(){"
+            "fetch('/api/status')"
+            ".then(r=>r.json())"
+            ".then(d=>{"
+                "document.querySelector('.time').textContent=d.time;"
+                "document.getElementById('motion-status').textContent=d.pir_motion?'DETECTED':'None';"
+                "document.getElementById('rip-status').innerHTML='RIP Tombstone: '+(d.rip_tombstone.connected?'✓ Connected':'✗ Not connected')+' | Time: '+(d.rip_tombstone.time_synced?'✓ Synced':'✗ Not synced')+' | <b>'+(d.rip_tombstone.in_cooldown?'COOLDOWN':'READY')+'</b>';"
+                "document.getElementById('halloween-status').innerHTML='Haunted Pumpkin Scarecrow: '+(d.halloween_trigger.connected?'✓ Connected':'✗ Not connected')+' | Time: '+(d.halloween_trigger.time_synced?'✓ Synced':'✗ Not synced')+' | <b>'+(d.halloween_trigger.in_cooldown?'COOLDOWN':'READY')+'</b>';"
+                "let eventsHtml='';"
+                "if(d.events&&d.events.length>0){"
+                    "d.events.forEach(e=>{"
+                        "eventsHtml+='<div class=\"event\"><span class=\"event-time\">'+e.time+'</span>';"
+                        "eventsHtml+='<span class=\"event-type\">'+getEventLabel(e.type)+'</span>';"
+                        "if(e.device)eventsHtml+='<span class=\"event-device\">- '+e.device+'</span>';"
+                        "eventsHtml+='</div>';"
+                    "});"
+                "}else{"
+                    "eventsHtml='<div style=\"color:#888;text-align:center\">No events yet</div>';"
+                "}"
+                "document.getElementById('event-log').innerHTML=eventsHtml;"
+            "})"
+            ".catch(e=>console.error('Status update failed:',e));"
+        "}"
+        "updateStatus();"  // Update immediately on load
+        "setInterval(updateStatus,2000);"  // Update every 2 seconds
+        "</script>"
         "</body></html>");
 
     httpd_resp_sendstr_chunk(req, NULL);
@@ -922,6 +1123,85 @@ static esp_err_t trigger_both_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t status_json_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "HTTP GET /api/status");
+
+    char time_str[64];
+    get_current_time_str(time_str, sizeof(time_str));
+
+    httpd_resp_set_type(req, "application/json");
+
+    // Start building JSON (use chunked sending for large responses)
+    httpd_resp_sendstr_chunk(req, "{");
+
+    // Current status
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "\"time\":\"%s\","
+        "\"pir_motion\":%s,"
+        "\"rip_tombstone\":{"
+            "\"connected\":%s,"
+            "\"time_synced\":%s,"
+            "\"in_cooldown\":%s"
+        "},"
+        "\"halloween_trigger\":{"
+            "\"connected\":%s,"
+            "\"time_synced\":%s,"
+            "\"in_cooldown\":%s"
+        "},",
+        time_str,
+        pir_motion_detected ? "true" : "false",
+        rip_tombstone.is_connected ? "true" : "false",
+        rip_tombstone.time_synced ? "true" : "false",
+        rip_tombstone.in_cooldown ? "true" : "false",
+        halloween_trigger.is_connected ? "true" : "false",
+        halloween_trigger.time_synced ? "true" : "false",
+        halloween_trigger.in_cooldown ? "true" : "false"
+    );
+    httpd_resp_sendstr_chunk(req, buf);
+
+    // Event log (last 20 events, newest first)
+    httpd_resp_sendstr_chunk(req, "\"events\":[");
+
+    int events_to_show = (event_log_count < 20) ? event_log_count : 20;
+    for (int i = 0; i < events_to_show; i++) {
+        // Calculate index (newest first)
+        int idx = (event_log_head - 1 - i + MAX_EVENTS) % MAX_EVENTS;
+        if (idx < 0 || idx >= event_log_count) continue;
+
+        const char *event_type;
+        switch (event_log[idx].type) {
+            case EVENT_MOTION_DETECTED: event_type = "motion_detected"; break;
+            case EVENT_MOTION_STOPPED: event_type = "motion_stopped"; break;
+            case EVENT_TRIGGER_RIP: event_type = "trigger_rip"; break;
+            case EVENT_TRIGGER_HALLOWEEN: event_type = "trigger_halloween"; break;
+            case EVENT_TRIGGER_BOTH: event_type = "trigger_both"; break;
+            case EVENT_DEVICE_JOINED: event_type = "device_joined"; break;
+            case EVENT_DEVICE_LEFT: event_type = "device_left"; break;
+            default: event_type = "unknown"; break;
+        }
+
+        struct tm timeinfo;
+        localtime_r(&event_log[idx].timestamp, &timeinfo);
+        char event_time[32];
+        strftime(event_time, sizeof(event_time), "%H:%M:%S", &timeinfo);
+
+        if (event_log[idx].device_name[0] != '\0') {
+            snprintf(buf, sizeof(buf), "%s{\"time\":\"%s\",\"type\":\"%s\",\"device\":\"%s\"}",
+                     (i > 0) ? "," : "", event_time, event_type, event_log[idx].device_name);
+        } else {
+            snprintf(buf, sizeof(buf), "%s{\"time\":\"%s\",\"type\":\"%s\"}",
+                     (i > 0) ? "," : "", event_time, event_type);
+        }
+        httpd_resp_sendstr_chunk(req, buf);
+    }
+
+    httpd_resp_sendstr_chunk(req, "]}");
+    httpd_resp_sendstr_chunk(req, NULL);
+    return ESP_OK;
+}
+
 httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
@@ -931,6 +1211,9 @@ httpd_handle_t start_webserver(void)
     if (httpd_start(&server, &config) == ESP_OK) {
         httpd_uri_t root = {.uri = "/", .method = HTTP_GET, .handler = root_handler};
         httpd_register_uri_handler(server, &root);
+
+        httpd_uri_t status_json = {.uri = "/api/status", .method = HTTP_GET, .handler = status_json_handler};
+        httpd_register_uri_handler(server, &status_json);
 
         httpd_uri_t trigger_rip = {.uri = "/trigger/rip", .method = HTTP_POST, .handler = trigger_rip_handler};
         httpd_register_uri_handler(server, &trigger_rip);
@@ -967,12 +1250,25 @@ void pir_monitor_task(void *pvParameters)
 
             if (current_motion) {
                 ESP_LOGI(TAG, "🟢 Motion detected!");
+                log_event(EVENT_MOTION_DETECTED, NULL);
                 oled_print_2lines("MOTION!", "DETECTED");
 
-                // Auto-trigger via UART to XIAO C6
-                trigger_both_uart();
+                // Auto-trigger via UART to XIAO C6 (intelligently trigger based on connected devices)
+                bool rip_ready = rip_tombstone.is_connected;
+                bool halloween_ready = halloween_trigger.is_connected;
+
+                if (rip_ready && halloween_ready) {
+                    trigger_both_uart();
+                } else if (halloween_ready) {
+                    trigger_halloween_decoration_uart();
+                } else if (rip_ready) {
+                    trigger_rip_tombstone_uart();
+                } else {
+                    ESP_LOGW(TAG, "Motion detected but no devices connected!");
+                }
             } else {
                 ESP_LOGI(TAG, "⚫ Motion stopped");
+                log_event(EVENT_MOTION_STOPPED, NULL);
                 // Return to showing WiFi status
                 oled_print_2lines(wifi_ssid, wifi_ip);
             }
@@ -1044,8 +1340,19 @@ void app_main(void)
         ESP_LOGI(TAG, "╚══════════════════════════════════════════════╝");
     }
 
+    // Start UART receiver task to get device status from XIAO C6
+    xTaskCreate(uart_receiver_task, "UART_receiver", 4096, NULL, 5, NULL);
+
+    // Start status request task (polls coordinator every 3 seconds)
+    xTaskCreate(status_request_task, "status_request", 4096, NULL, 4, NULL);
+    ESP_LOGI(TAG, "Status request task started (polls every 3 seconds)");
+
     // Start PIR monitoring (increased stack size for UART + I2C operations)
     xTaskCreate(pir_monitor_task, "PIR_monitor", 4096, NULL, 4, NULL);
+
+    // Request initial device status from XIAO C6
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    uart_request_status();
 
     // Display ready message
     vTaskDelay(pdMS_TO_TICKS(1000));
