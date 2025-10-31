@@ -19,82 +19,36 @@ _source_esp_idf:
 	end
 
 # ============================================================================
-# Unified Commands (Both Devices)
-# ============================================================================
-
-# Build both firmwares
-build: _source_esp_idf
-	#!/usr/bin/env fish
-	set -euo pipefail
-	echo ">>> Building both firmwares..."
-	echo ""
-	echo ">>> Building TinyS3 (ESP32-S3 WiFi/HTTP controller)..."
-	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py build
-	echo ""
-	echo ">>> Building XIAO C6 (ESP32-C6 Zigbee coordinator)..."
-	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py build
-	echo ""
-	echo "✅ Both firmwares built successfully!"
-
-# Flash both devices (REQUIRED: just flash /dev/ttyACM0 /dev/ttyACM1)
-flash GATEWAY_PORT COORD_PORT: _source_esp_idf
-	#!/usr/bin/env bash
-	set -euo pipefail
-	echo ">>> Flashing both devices..."
-	echo ">>> Gateway (TinyS3) port: {{GATEWAY_PORT}}"
-	echo ">>> Coordinator (XIAO C6) port: {{COORD_PORT}}"
-	echo ""
-	echo ">>> Flashing TinyS3..."
-	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p {{GATEWAY_PORT}} flash
-	echo ""
-	echo ">>> Flashing XIAO C6..."
-	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p {{COORD_PORT}} flash
-	echo ""
-	echo "✅ Both devices flashed successfully!"
-
-# Development workflow: build both devices (flash separately with explicit ports)
-dev: _source_esp_idf build
-	@echo ""
-	@echo "✅ Build complete!"
-	@echo ""
-	@echo "To flash and monitor devices:"
-	@echo "   just flash-tinys3 /dev/ttyACM0   # Flash TinyS3"
-	@echo "   just flash-xiaoc6 /dev/ttyACM1   # Flash XIAO C6"
-	@echo "   just monitor-tinys3 /dev/ttyACM0 # Monitor TinyS3"
-	@echo "   just monitor-xiaoc6 /dev/ttyACM1 # Monitor XIAO C6"
-
-# Clean both projects
-clean: _source_esp_idf
-	#!/usr/bin/env fish
-	echo ">>> Cleaning both projects..."
-	cd {{TINYS3_DIR}} && idf.py fullclean
-	cd {{XIAOC6_DIR}} && idf.py fullclean
-	echo "✅ Clean complete!"
-
-# Erase flash on both devices (REQUIRED: just erase /dev/ttyACM0 /dev/ttyACM1)
-erase GATEWAY_PORT COORD_PORT: _source_esp_idf
-	#!/usr/bin/env fish
-	echo ">>> Erasing flash on both devices..."
-	echo ">>> Gateway (TinyS3) port: {{GATEWAY_PORT}}"
-	echo ">>> Coordinator (XIAO C6) port: {{COORD_PORT}}"
-	echo ""
-	echo ">>> Erasing TinyS3..."
-	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p {{GATEWAY_PORT}} erase-flash
-	echo ""
-	echo ">>> Erasing XIAO C6..."
-	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p {{COORD_PORT}} erase-flash
-	echo ""
-	echo "✅ Flash erased on both devices!"
-
-# ============================================================================
 # TinyS3 (ESP32-S3 WiFi/HTTP Controller) Commands
 # ============================================================================
+
+# Erase TinyS3 flash only (REQUIRED: just erase-tinys3 /dev/ttyACM0)
+erase-tinys3 PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Erasing TinyS3 flash..."
+	echo ">>> Using port: {{PORT}}"
+	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py -p {{PORT}} erase-flash
+	echo ">>> TinyS3 flash erased!"
+
+# Clean TinyS3 only (build artifacts only, keeps sdkconfig)
+clean-tinys3: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Cleaning TinyS3..."
+	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py fullclean
+	echo ">>> TinyS3 clean complete!"
+
+# Deep clean TinyS3 only
+deep-clean-tinys3: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Deep cleaning TinyS3..."
+	cd {{justfile_directory()}}/{{TINYS3_DIR}} && rm -rf build sdkconfig managed_components dependencies.lock
+	echo ">>> TinyS3 deep clean complete!"
 
 # Build TinyS3 firmware only
 build-tinys3: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>> Building TinyS3 firmware..."
-	cd {{TINYS3_DIR}} && idf.py build
+	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py build
 
 # Flash TinyS3 only (REQUIRED: just flash-tinys3 /dev/ttyACM0)
 flash-tinys3 PORT: _source_esp_idf
@@ -122,24 +76,46 @@ menuconfig-tinys3: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>>  Configuring TinyS3..."
 	echo ">>> Set WiFi SSID and password"
-	cd {{TINYS3_DIR}} && idf.py menuconfig
+	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py menuconfig
 
 # Set TinyS3 target (one-time setup)
 set-target-tinys3: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>> Setting TinyS3 target to ESP32-S3..."
-	cd {{TINYS3_DIR}} && idf.py set-target esp32s3
-	echo "✅ Target set! Run: just menuconfig-tinys3 (to set WiFi)"
+	cd {{justfile_directory()}}/{{TINYS3_DIR}} && idf.py set-target esp32s3
+	echo ">>> Target set! Run: just menuconfig-tinys3 (to set WiFi)"
 
 # ============================================================================
 # XIAO C6 (ESP32-C6 Zigbee Coordinator) Commands
 # ============================================================================
 
+# Erase XIAO C6 flash only (REQUIRED: just erase-xiaoc6 /dev/ttyACM1)
+erase-xiaoc6 PORT: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Erasing XIAO C6 flash..."
+	echo ">>> Using port: {{PORT}}"
+	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py -p {{PORT}} erase-flash
+	echo ">>> XIAO C6 flash erased!"
+
+# Clean XIAO C6 only (build artifacts only, keeps sdkconfig)
+clean-xiaoc6: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Cleaning XIAO C6..."
+	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py fullclean
+	echo ">>> XIAO C6 clean complete!"
+
+# Deep clean XIAO C6 only
+deep-clean-xiaoc6: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Deep cleaning XIAO C6..."
+	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && rm -rf build sdkconfig managed_components dependencies.lock
+	echo ">>> XIAO C6 deep clean complete!"
+
 # Build XIAO C6 firmware only
 build-xiaoc6: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>> Building XIAO C6 firmware..."
-	cd {{XIAOC6_DIR}} && idf.py build
+	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py build
 
 # Flash XIAO C6 only (REQUIRED: just flash-xiaoc6 /dev/ttyACM1)
 flash-xiaoc6 PORT: _source_esp_idf
@@ -166,14 +142,14 @@ dev-xiaoc6 PORT: build-xiaoc6 (flash-xiaoc6 PORT) (monitor-xiaoc6 PORT)
 menuconfig-xiaoc6: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>>  Configuring XIAO C6..."
-	cd {{XIAOC6_DIR}} && idf.py menuconfig
+	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py menuconfig
 
 # Set XIAO C6 target (one-time setup)
 set-target-xiaoc6: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>> Setting XIAO C6 target to ESP32-C6..."
-	cd {{XIAOC6_DIR}} && idf.py set-target esp32c6
-	echo "✅ Target set!"
+	cd {{justfile_directory()}}/{{XIAOC6_DIR}} && idf.py set-target esp32c6
+	echo ">>> Target set!"
 
 # ============================================================================
 # Information & Setup
@@ -221,18 +197,21 @@ help:
 	@echo "Zigbee Border Gateway - Quick Reference"
 	@echo "═══════════════════════════════════════"
 	@echo ""
-	@echo "Main Commands:"
-	@echo "   just dev              # Build both firmwares"
-	@echo "   just build            # Build both firmwares"
-	@echo "   just flash /dev/ttyACM0 /dev/ttyACM1  # Flash both (gateway coord)"
-	@echo ""
-	@echo "Individual Device Commands:"
-	@echo "   just dev-tinys3 /dev/ttyACM0       # Build, flash, monitor TinyS3"
-	@echo "   just dev-xiaoc6 /dev/ttyACM1       # Build, flash, monitor XIAO C6"
+	@echo "TinyS3 Commands:"
+	@echo "   just build-tinys3                  # Build TinyS3 firmware"
 	@echo "   just flash-tinys3 /dev/ttyACM0     # Flash TinyS3"
-	@echo "   just flash-xiaoc6 /dev/ttyACM1     # Flash XIAO C6"
 	@echo "   just monitor-tinys3 /dev/ttyACM0   # Monitor TinyS3"
-	@echo "   just monitor-xiaoc6 /dev/ttyACM1   # Monitor XIAO C6"
+	@echo "   just dev-tinys3 /dev/ttyACM0       # Build, flash, monitor"
+	@echo "   just clean-tinys3                  # Clean build artifacts"
+	@echo "   just erase-tinys3 /dev/ttyACM0     # Erase flash"
+	@echo ""
+	@echo "XIAO C6 Coordinator Commands:"
+	@echo "   just build-xiaoc6                  # Build coordinator firmware"
+	@echo "   just flash-xiaoc6 /dev/ttyACM1     # Flash coordinator"
+	@echo "   just monitor-xiaoc6 /dev/ttyACM1   # Monitor coordinator"
+	@echo "   just dev-xiaoc6 /dev/ttyACM1       # Build, flash, monitor"
+	@echo "   just clean-xiaoc6                  # Clean build artifacts"
+	@echo "   just erase-xiaoc6 /dev/ttyACM1     # Erase flash (safe with hardcoded network)"
 	@echo ""
 	@echo "Information:"
 	@echo "   just check            # Check device connections"

@@ -146,12 +146,14 @@ See individual project READMEs:
 
 ### Standard Build/Flash
 ```bash
-just clean             # Clean build artifacts
+just clean             # Clean build artifacts AND sdkconfig
 just erase /dev/ttyACM0 # Erase flash (explicit path required)
 just build             # Build project
 just flash /dev/ttyACM0 # Flash to device (no button pressing!)
 just monitor /dev/ttyACM0 # Monitor serial output
 ```
+
+**Note:** `just clean` now removes both `build/` and `sdkconfig` to ensure fresh builds use current `sdkconfig.defaults` settings.
 
 ### Quick Iteration
 When only changing code (not sdkconfig):

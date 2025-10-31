@@ -358,8 +358,21 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
                      attr_msg->info.cluster,
                      attr_msg->attribute.id);
 
+            // Check for On/Off cluster (0x0006) - trigger NeoPixel animation
+            if (attr_msg->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF) {
+                if (attr_msg->attribute.id == ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID) {
+                    bool on_off = *(bool *)attr_msg->attribute.data.value;
+                    ESP_LOGI(TAG, "Received On/Off command: %s", on_off ? "ON" : "OFF");
+
+                    if (on_off) {
+                        // Trigger NeoPixel flash animation
+                        ESP_LOGI(TAG, "Triggering NeoPixel flash from coordinator");
+                        blink_neopixels_red();
+                    }
+                }
+            }
             // Check for Time Sync cluster (custom cluster 0xFC00)
-            if (attr_msg->info.cluster == ZB_TIME_SYNC_CLUSTER_ID) {
+            else if (attr_msg->info.cluster == ZB_TIME_SYNC_CLUSTER_ID) {
                 if (attr_msg->attribute.id == ZB_TIME_SYNC_ATTR_ID) {
                     if (attr_msg->attribute.data.size == 4) {
                         time_t timestamp = *(uint32_t *)attr_msg->attribute.data.value;

@@ -11,7 +11,7 @@
 
 #### Initial Build (or after sdkconfig changes)
 ```bash
-# 1. Clean build artifacts
+# 1. Clean build artifacts AND sdkconfig
 just clean
 
 # 2. Erase flash completely (REQUIRED: specify device path)
@@ -27,7 +27,9 @@ just flash /dev/ttyACM0
 just monitor /dev/ttyACM0
 ```
 
-**Important**: You MUST specify the device path explicitly (e.g., `/dev/ttyACM0`). The Justfiles no longer auto-detect devices.
+**Important Notes:**
+- You MUST specify the device path explicitly (e.g., `/dev/ttyACM0`). The Justfiles no longer auto-detect devices.
+- `just clean` now removes BOTH `build/` and `sdkconfig` to ensure a completely fresh build with current settings from `sdkconfig.defaults`.
 
 #### Quick Rebuild (no sdkconfig changes)
 If you're just modifying code and haven't changed `sdkconfig.defaults` or run `menuconfig`:
@@ -90,7 +92,7 @@ just monitor-xiaoc6 /dev/ttyACM1
 
 #### Build Errors After Config Changes
 ```bash
-rm -rf build sdkconfig
+just clean  # Now removes both build/ and sdkconfig
 just build
 ```
 
@@ -165,6 +167,31 @@ This architecture means end devices don't need hardcoded IEEE addresses of other
 - Time-based sleep (12am-6am)
 - Trigger request cluster CLIENT (0xFC01)
 
+## Zigbee Network Configuration
+
+### Channel Settings
+- **Primary Channel**: Channel 15 (2480 MHz)
+- **Channel Mask**: `(1 << 15)` - Coordinator uses fixed channel
+- **End Device Scanning**: `ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK` - End devices scan all channels to find coordinator
+- **Why Channel 15**: Higher channel number reduces interference with WiFi (which typically uses channels 1, 6, 11)
+
+**CRITICAL**: The coordinator MUST have the channel explicitly set using `esp_zb_set_primary_network_channel_set()`, otherwise it will form the network on a random channel and end devices will fail to join.
+
+### Hardcoded Network Credentials
+For production resilience, the coordinator has hardcoded network credentials so it always forms the same network after flash erase:
+
+- **Extended PAN ID**: `0xDEADBEEFCAFEBABE` (8 bytes)
+- **Network Key**: `"ZigbeeWeen2025!!"` (16 bytes: `0x5A696762656557656565...`)
+
+These values are set in `zigbee_border_gateway/xiaoc6_zigbee/main/main.c` using:
+```c
+esp_zb_set_extended_pan_id(ext_pan_id);
+esp_zb_secur_network_key_set(nwk_key);
+esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
+```
+
+**WARNING**: Do NOT change these values once devices are deployed in the yard. Changing them will require re-flashing ALL devices.
+
 ## Zigbee Custom Clusters
 
 ### Time Sync Cluster (0xFC00)
@@ -191,6 +218,8 @@ This architecture means end devices don't need hardcoded IEEE addresses of other
 2. Verify IEEE addresses match between code and actual devices
 3. Use `esp_zb_bdb_open_network(255)` to keep network open for joining
 4. Check signal strength with neighbor table iteration
+5. **If devices won't join after erase/reflash**: Power cycle the coordinator to reset the permit join state
+6. **If only some devices join**: Try power cycling end devices - they may need a fresh boot to properly scan channels
 
 ### Adding New Zigbee End Devices
 1. Add IEEE address to coordinator's hardcoded list

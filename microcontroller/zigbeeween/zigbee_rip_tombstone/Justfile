@@ -53,11 +53,19 @@ build: _source_esp_idf
 	echo "Building project..."
 	idf.py build
 
-# Clean build artifacts
+# Clean build artifacts only (keeps sdkconfig with correct target)
 clean: _source_esp_idf
 	#!/usr/bin/env fish
 	echo ">>> Cleaning build artifacts..."
 	idf.py fullclean
+	echo ">>> Clean complete!"
+
+# Deep clean: remove build, sdkconfig, and managed components
+deep-clean: _source_esp_idf
+	#!/usr/bin/env fish
+	echo ">>> Deep cleaning (build + sdkconfig + managed_components)..."
+	rm -rf build sdkconfig managed_components dependencies.lock
+	echo ">>> Deep clean complete! Run 'just build' to rebuild from scratch."
 
 # Flash firmware to device (REQUIRED: just flash /dev/ttyACM0)
 flash PORT: _source_esp_idf
@@ -79,8 +87,8 @@ monitor PORT: _source_esp_idf
 
 	idf.py -p {{PORT}} monitor
 
-# Build and flash in one command
-flash-monitor: build flash monitor
+# Build and flash in one command (REQUIRED: just flash-monitor /dev/ttyACM0)
+flash-monitor PORT: build (flash PORT) (monitor PORT)
 
 # Erase flash completely (REQUIRED: just erase /dev/ttyACM0)
 erase PORT: _source_esp_idf
@@ -92,8 +100,8 @@ erase PORT: _source_esp_idf
 
 	idf.py -p {{PORT}} erase-flash
 
-# Development workflow: build, flash, and monitor
-dev: build flash monitor
+# Development workflow: build, flash, and monitor (REQUIRED: just dev /dev/ttyACM0)
+dev PORT: build (flash PORT) (monitor PORT)
 
 # Show app size information
 size: _source_esp_idf

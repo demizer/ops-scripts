@@ -539,6 +539,32 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
             }
         }
         break;
+
+    case ESP_ZB_ZDO_SIGNAL_LEAVE_INDICATION:
+        if (err_status == ESP_OK) {
+            esp_zb_zdo_signal_leave_indication_params_t *leave_params = (esp_zb_zdo_signal_leave_indication_params_t *)esp_zb_app_signal_get_params(p_sg_p);
+            uint64_t ieee_addr = 0;
+            memcpy(&ieee_addr, leave_params->device_addr, sizeof(esp_zb_ieee_addr_t));
+
+            ESP_LOGI(TAG, "Device left network: short=0x%04hx, ieee=0x%016llx", leave_params->short_addr, ieee_addr);
+
+            // Mark device as disconnected
+            if (ieee_addr == HALLOWEEN_TRIGGER_IEEE) {
+                halloween_trigger.is_bound = false;
+                halloween_trigger.short_addr = 0;
+                halloween_trigger.time_synced = false;
+                ESP_LOGI(TAG, "Haunted Pumpkin Scarecrow disconnected");
+                uart_send_device_event(CMD_DEVICE_LEFT, DEVICE_ID_HALLOWEEN);
+            } else if (ieee_addr == RIP_TOMBSTONE_IEEE) {
+                rip_tombstone.is_bound = false;
+                rip_tombstone.short_addr = 0;
+                rip_tombstone.time_synced = false;
+                ESP_LOGI(TAG, "RIP Tombstone disconnected");
+                uart_send_device_event(CMD_DEVICE_LEFT, DEVICE_ID_RIP);
+            }
+        }
+        break;
+
     default:
         ESP_LOGI(TAG, "ZDO signal: %s (0x%x), status: %s", esp_zb_zdo_signal_to_string(sig_type), sig_type,
                  esp_err_to_name(err_status));
@@ -548,6 +574,18 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
 
 static void esp_zb_task(void *pvParameters)
 {
+    // CRITICAL: Hardcoded network credentials for production resilience
+    // These values ensure the coordinator forms the SAME network after flash erase
+    // DO NOT CHANGE these values once devices are deployed!
+
+    // Fixed Extended PAN ID (8 bytes) - uniquely identifies this Zigbee network
+    uint8_t ext_pan_id[8] = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE};
+
+    // Fixed Network Key (16 bytes) - encryption key for the network
+    // WARNING: In production, use a cryptographically random key!
+    uint8_t nwk_key[16] = {0x5A, 0x69, 0x67, 0x62, 0x65, 0x65, 0x57, 0x65,
+                           0x65, 0x6E, 0x32, 0x30, 0x32, 0x35, 0x21, 0x21};
+
     // Configure as coordinator
     esp_zb_cfg_t zb_nwk_cfg;
     zb_nwk_cfg.esp_zb_role = ESP_ZB_DEVICE_TYPE_COORDINATOR;
@@ -555,6 +593,13 @@ static void esp_zb_task(void *pvParameters)
     zb_nwk_cfg.nwk_cfg.zczr_cfg.max_children = 10;
 
     esp_zb_init(&zb_nwk_cfg);
+
+    // Set the fixed extended PAN ID and network key
+    esp_zb_set_extended_pan_id(ext_pan_id);
+    esp_zb_secur_network_key_set(nwk_key);
+
+    // Set the primary channel to channel 15
+    esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
 
     // Create endpoint list
     esp_zb_ep_list_t *ep_list = esp_zb_ep_list_create();
