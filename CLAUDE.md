@@ -4,3 +4,4 @@
 - Shell scripts should not use -e as that causes them to fail on simple logic.
 - All chroot operations targeting an Arch Linux install should use arch-chroot.
 - Echo all commands and flags before use including the source line number.
+- Do not add emoji
