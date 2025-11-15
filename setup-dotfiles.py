@@ -370,6 +370,39 @@ def setup_fish_dotfiles() -> None:
     for conf_file in conf_files:
         ensure_copy(DOTFILES_DIR / f"fish-{conf_file}", fish_confd_dir / conf_file)
 
+    # Check if fisher is installed
+    log.info("[bold blue]Checking for fisher[/]")
+    fisher_check_exit = run_cmd(["fish", "-c", "fisher -v > /dev/null 2>&1"])
+
+    if fisher_check_exit != 0:
+        log.info("[yellow]Fisher not installed, installing...[/]")
+        # Download fisher installer
+        fisher_url = "https://git.io/fisher"
+        fisher_installer = "/tmp/fisher-install"
+
+        log.info(f"[cyan]Downloading fisher from {fisher_url}[/]")
+        run_cmd_quiet(["wget", "-q", "-O", fisher_installer, fisher_url])
+
+        # Install fisher
+        log.info("[cyan]Installing fisher[/]")
+        run_cmd_quiet(["fish", "-c", f"source {fisher_installer} && fisher install jorgebucaran/fisher"])
+        log.info("[green]Fisher installed successfully[/]")
+    else:
+        log.info("[green]Fisher is already installed[/]")
+
+    # Install fish plugins
+    log.info("[bold blue]Install fish plugins[/]")
+    plugins = [
+        "pure-fish/pure",
+        "jethrokuan/z",
+        "danhper/fish-ssh-agent"
+    ]
+
+    for plugin in plugins:
+        log.info(f"[cyan]Installing plugin: {plugin}[/]")
+        run_cmd_quiet(["fish", "-c", f"fisher install {plugin}"])
+        log.info(f"[green]Plugin {plugin} installed successfully[/]")
+
 
 def setup_kitty_dotfiles() -> None:
     """Setup kitty terminal dotfiles"""
