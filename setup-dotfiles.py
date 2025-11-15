@@ -29,6 +29,7 @@ Features:
 
 import argparse
 import difflib
+import json
 import logging
 import shutil
 import socket
@@ -138,6 +139,44 @@ def file_exists(file_path: Path) -> bool:
     return file_path.is_file()
 
 
+def check_lazy_lock_diff(source: Path, dest: Path) -> str:
+    """
+    Check if the only difference between two lazy-lock.json files is the lazy.nvim plugin.
+    Returns:
+        'identical' - files are identical
+        'only-lazy' - only lazy.nvim differs
+        'other-changes' - other plugins differ
+        'error' - couldn't parse or compare
+    """
+    try:
+        with open(source, 'r') as f:
+            source_data = json.load(f)
+        with open(dest, 'r') as f:
+            dest_data = json.load(f)
+
+        if source_data == dest_data:
+            return 'identical'
+
+        # Get all keys from both files
+        all_keys = set(source_data.keys()) | set(dest_data.keys())
+
+        # Track which keys differ
+        differing_keys = []
+        for key in all_keys:
+            if source_data.get(key) != dest_data.get(key):
+                differing_keys.append(key)
+
+        # If only lazy.nvim differs
+        if differing_keys == ['lazy.nvim']:
+            return 'only-lazy'
+        else:
+            return 'other-changes'
+
+    except Exception as e:
+        log.debug(f"Error checking lazy lock diff: {e}")
+        return 'error'
+
+
 def show_file_diff(source: Path, dest: Path) -> None:
     """Show diff between two files"""
     log.info(f"Showing diff between {source} and {dest}", stacklevel=2)
@@ -151,12 +190,27 @@ def show_file_diff(source: Path, dest: Path) -> None:
         return
 
     try:
+        # Get modification times
+        source_mtime = source.stat().st_mtime
+        dest_mtime = dest.stat().st_mtime
+        source_time = datetime.fromtimestamp(source_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        dest_time = datetime.fromtimestamp(dest_mtime).strftime('%Y-%m-%d %H:%M:%S')
+
+        if source_mtime > dest_mtime:
+            log.info(f"[cyan]Source[/] [bold]{source}[/] [cyan]is newer[/] [dim]({source_time})[/]", stacklevel=2)
+            log.info(f"[cyan]Dest[/] [bold]{dest}[/] [cyan]is older[/] [dim]({dest_time})[/]", stacklevel=2)
+        elif dest_mtime > source_mtime:
+            log.info(f"[cyan]Dest[/] [bold]{dest}[/] [cyan]is newer[/] [dim]({dest_time})[/]", stacklevel=2)
+            log.info(f"[cyan]Source[/] [bold]{source}[/] [cyan]is older[/] [dim]({source_time})[/]", stacklevel=2)
+        else:
+            log.info(f"[cyan]Both files have same modification time[/] [dim]({source_time})[/]", stacklevel=2)
+
         with open(source, 'r') as f:
             source_lines = f.readlines()
         with open(dest, 'r') as f:
             dest_lines = f.readlines()
 
-        diff = List(difflib.unified_diff(
+        diff = list(difflib.unified_diff(
             dest_lines, source_lines,
             fromfile=str(dest), tofile=str(source),
             lineterm=''
@@ -400,6 +454,46 @@ vim.opt.shiftwidth = 4
     lazy_lock_dest = nvim_config_dir / "lazy-lock.json"
     if lazy_lock_src.exists():
         log.info("[bold blue]Setup lazy-lock.json[/]")
+
+        # Check if destination exists and differs
+        if lazy_lock_dest.exists():
+            diff_type = check_lazy_lock_diff(lazy_lock_src, lazy_lock_dest)
+
+            if diff_type == 'identical':
+                log.debug("lazy-lock.json files are identical")
+            elif diff_type == 'only-lazy':
+                log.info("[cyan]The only difference is the lazy.nvim plugin version[/]")
+                show_file_diff(lazy_lock_src, lazy_lock_dest)
+
+                try:
+                    if Confirm.ask("Update source dotfiles with newer lazy.nvim version?", default=True):
+                        log.info(f"[green]Updating[/] [bold cyan]{lazy_lock_src}[/] [green]with[/] [bold cyan]{lazy_lock_dest}[/]")
+                        if not DRY_RUN:
+                            shutil.copy2(lazy_lock_dest, lazy_lock_src)
+                        else:
+                            log.warning(f"[yellow]NORUN:[/] [dim]cp '{lazy_lock_dest}' '{lazy_lock_src}'[/]")
+                        return
+                    else:
+                        log.info("[dim]Will copy source over destination[/]")
+                except KeyboardInterrupt:
+                    log.info("\n[dim]Interrupted, skipping lazy-lock.json[/]")
+                    return
+
+            # If we got here, proceed with normal copy
+            will_copy = lazy_lock_src.read_bytes() != lazy_lock_dest.read_bytes()
+        else:
+            will_copy = True
+
+        # If we're going to copy a new lock file, delete the plugins directory
+        if will_copy:
+            lazy_plugins_dir = Path.home() / ".local" / "share" / "nvim" / "lazy"
+            if lazy_plugins_dir.exists():
+                log.info(f"[yellow]Deleting lazy plugins directory to force reinstall:[/] [bold]{lazy_plugins_dir}[/]")
+                if not DRY_RUN:
+                    shutil.rmtree(lazy_plugins_dir)
+                else:
+                    log.warning(f"[yellow]NORUN:[/] [dim]rm -rf '{lazy_plugins_dir}'[/]")
+
         ensure_copy(lazy_lock_src, lazy_lock_dest)
     else:
         log.info("[dim]neovim-lazy-lock.json not found, skipping[/]")
@@ -522,4 +616,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.log("\n[yellow]Interrupted by user[/]")
+        sys.exit(130)
