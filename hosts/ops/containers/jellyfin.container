@@ -6,6 +6,8 @@ UserNS=keep-id
 Volume=jellyfin-config:/config:Z
 Volume=jellyfin-cache:/cache:Z
 Volume=jellyfin-movies:/media/movies:Z
+Volume=/mnt/music:/media/music:Z
+Volume=/mnt/shows:/media/shows:Z
 
 [Service]
 SuccessExitStatus=0 143
