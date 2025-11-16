@@ -50,28 +50,6 @@ console = setup_common.console
 log = setup_common.log
 
 
-def ensure_user_lingering() -> None:
-    """Ensure user lingering is enabled for persistent user services"""
-    import getpass
-    username = getpass.getuser()
-
-    log.info("[blue]Checking user lingering...[/]", stacklevel=2)
-
-    # Check if lingering is already enabled
-    linger_file = Path(f"/var/lib/systemd/linger/{username}")
-
-    if linger_file.exists():
-        log.info(f"[dim]User lingering already enabled for {username}[/]", stacklevel=2)
-        return
-
-    log.info(f"[yellow]Enabling user lingering for {username}...[/]", stacklevel=2)
-    exit_code = setup_common.run_cmd(["sudo", "loginctl", "enable-linger", username], dry_run=DRY_RUN)
-
-    if exit_code != 0:
-        log.error("[red]Failed to enable user lingering[/]", stacklevel=2)
-        sys.exit(1)
-
-
 def daemon_reload() -> None:
     """Reload systemd user daemon"""
     log.info("[blue]Reloading systemd user daemon[/]", stacklevel=2)
@@ -81,9 +59,6 @@ def daemon_reload() -> None:
 def setup_containers() -> None:
     """Setup container systemd units"""
     console.log(Panel("CONTAINER SYSTEMD UNITS", style="bold green"))
-
-    # Ensure user lingering is enabled for persistent services
-    ensure_user_lingering()
 
     setup_common.ensure_dir_exists(DEST_DIR, dry_run=DRY_RUN)
 
