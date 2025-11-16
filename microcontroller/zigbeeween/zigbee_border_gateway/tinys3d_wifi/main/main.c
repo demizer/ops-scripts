@@ -69,6 +69,11 @@ typedef struct {
 static zigbee_device_t rip_tombstone = {"RIP Tombstone", false, false, false};
 static zigbee_device_t halloween_trigger = {"Haunted Pumpkin Scarecrow", false, false, false};
 
+// Coordinator status tracking
+static bool coordinator_online = false;
+static time_t last_coordinator_response = 0;
+#define COORDINATOR_TIMEOUT_SECONDS 10  // Consider coordinator offline after 10 seconds
+
 // UART command protocol
 #define CMD_TRIGGER_RIP 0x01
 #define CMD_TRIGGER_HALLOWEEN 0x02
@@ -604,6 +609,17 @@ void status_request_task(void *pvParameters)
 
     while (1) {
         uart_request_status();
+
+        // Check if coordinator has timed out
+        time_t now;
+        time(&now);
+        if (coordinator_online && last_coordinator_response > 0) {
+            if (difftime(now, last_coordinator_response) > COORDINATOR_TIMEOUT_SECONDS) {
+                ESP_LOGW(TAG, "Coordinator timeout - no response for %d seconds", COORDINATOR_TIMEOUT_SECONDS);
+                coordinator_online = false;
+            }
+        }
+
         vTaskDelay(pdMS_TO_TICKS(3000));  // Request every 3 seconds
     }
 }
@@ -685,6 +701,10 @@ void uart_receiver_task(void *pvParameters)
                     bool halloween_connected = (flags & (1 << 3)) != 0;
                     bool rip_cooldown = (flags & (1 << 4)) != 0;
                     bool halloween_cooldown = (flags & (1 << 5)) != 0;
+
+                    // Mark coordinator as online and update timestamp
+                    coordinator_online = true;
+                    time(&last_coordinator_response);
 
                     // Update device status
                     rip_tombstone.time_synced = rip_time_synced;
@@ -1028,17 +1048,22 @@ static esp_err_t root_handler(httpd_req_t *req)
              pir_motion_detected ? "DETECTED" : "None");
     httpd_resp_sendstr_chunk(req, buf);
 
-    snprintf(buf, sizeof(buf), "<p id='rip-status'>RIP Tombstone: %s | Time: %s | <b>%s</b></p>",
-             rip_tombstone.is_connected ? "✓ Connected" : "✗ Not connected",
-             rip_tombstone.time_synced ? "✓ Synced" : "✗ Not synced",
-             rip_tombstone.in_cooldown ? "COOLDOWN" : "READY");
-    httpd_resp_sendstr_chunk(req, buf);
+    // Check if coordinator is online
+    if (!coordinator_online) {
+        httpd_resp_sendstr_chunk(req, "<p style='color: #ff4444; font-weight: bold; font-size: 1.2em;'>⚠ Coordinator OFFLINE</p>");
+    } else {
+        snprintf(buf, sizeof(buf), "<p id='rip-status'>RIP Tombstone: %s | Time: %s | <b>%s</b></p>",
+                 rip_tombstone.is_connected ? "✓ Connected" : "✗ Not connected",
+                 rip_tombstone.time_synced ? "✓ Synced" : "✗ Not synced",
+                 rip_tombstone.in_cooldown ? "COOLDOWN" : "READY");
+        httpd_resp_sendstr_chunk(req, buf);
 
-    snprintf(buf, sizeof(buf), "<p id='halloween-status'>Haunted Pumpkin Scarecrow: %s | Time: %s | <b>%s</b></p>",
-             halloween_trigger.is_connected ? "✓ Connected" : "✗ Not connected",
-             halloween_trigger.time_synced ? "✓ Synced" : "✗ Not synced",
-             halloween_trigger.in_cooldown ? "COOLDOWN" : "READY");
-    httpd_resp_sendstr_chunk(req, buf);
+        snprintf(buf, sizeof(buf), "<p id='halloween-status'>Haunted Pumpkin Scarecrow: %s | Time: %s | <b>%s</b></p>",
+                 halloween_trigger.is_connected ? "✓ Connected" : "✗ Not connected",
+                 halloween_trigger.time_synced ? "✓ Synced" : "✗ Not synced",
+                 halloween_trigger.in_cooldown ? "COOLDOWN" : "READY");
+        httpd_resp_sendstr_chunk(req, buf);
+    }
 
     httpd_resp_sendstr_chunk(req,
         "</div>"

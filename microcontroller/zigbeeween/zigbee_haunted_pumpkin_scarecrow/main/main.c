@@ -16,9 +16,8 @@ static const char *TAG = "haunted_pumpkin_scarecrow";
 // Pin definitions
 #define RELAY_TRIGGER_PIN GPIO_NUM_18  // Relay control pin (connects to IN1 on relay module)
 #define LED_PIN GPIO_NUM_15            // Built-in yellow LED on Xiao ESP32-C6
-
-// Antenna configuration (ESP32-C6 has internal antenna by default)
-// No external antenna pin configuration needed
+#define RF_SWITCH_PIN GPIO_NUM_3       // RF switch power
+#define ANTENNA_SELECT_PIN GPIO_NUM_14 // External antenna select
 
 // Relay configuration
 // SainSmart 2-channel 5V relay module:
@@ -130,6 +129,33 @@ void setup_led(void)
     gpio_set_level(LED_PIN, 0);
 
     ESP_LOGI(TAG, "Yellow LED initialized on GPIO%d", LED_PIN);
+}
+
+void setup_external_antenna(void)
+{
+    // Configure RF switch power (GPIO3)
+    gpio_config_t rf_switch_conf = {
+        .pin_bit_mask = (1ULL << RF_SWITCH_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&rf_switch_conf);
+    gpio_set_level(RF_SWITCH_PIN, 0);  // Power on (LOW)
+
+    // Configure antenna select (GPIO14)
+    gpio_config_t antenna_conf = {
+        .pin_bit_mask = (1ULL << ANTENNA_SELECT_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&antenna_conf);
+    gpio_set_level(ANTENNA_SELECT_PIN, 1);  // Select external antenna (HIGH)
+
+    ESP_LOGI(TAG, "External antenna configured");
 }
 
 // Timer callback to reset cooldown (non-blocking)
@@ -249,10 +275,13 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
             }
             // Check for Time Sync cluster (custom cluster 0xFC00)
             else if (attr_msg->info.cluster == ZB_TIME_SYNC_CLUSTER_ID) {
+                ESP_LOGI(TAG, "Received time sync cluster write (cluster=0x%04x, attr=0x%04x)",
+                         attr_msg->info.cluster, attr_msg->attribute.id);
                 if (attr_msg->attribute.id == ZB_TIME_SYNC_ATTR_ID) {
                     // Expecting 4-byte Unix timestamp (uint32_t)
                     if (attr_msg->attribute.data.size == 4) {
                         time_t timestamp = *(uint32_t *)attr_msg->attribute.data.value;
+                        ESP_LOGI(TAG, "Received time sync from coordinator: timestamp=%lu", (unsigned long)timestamp);
                         set_system_time(timestamp);
                     } else {
                         ESP_LOGW(TAG, "Time sync attribute has unexpected size: %d bytes",
@@ -324,6 +353,8 @@ static void esp_zb_task(void *pvParameters)
     zb_nwk_cfg.install_code_policy = false;
     zb_nwk_cfg.nwk_cfg.zed_cfg.ed_timeout = ESP_ZB_ED_AGING_TIMEOUT_64MIN;
     zb_nwk_cfg.nwk_cfg.zed_cfg.keep_alive = 3000;
+
+    ESP_LOGI(TAG, "Initializing Zigbee stack as END DEVICE");
     esp_zb_init(&zb_nwk_cfg);
 
     // Create endpoint list
@@ -370,6 +401,11 @@ static void esp_zb_task(void *pvParameters)
 
     ESP_LOGI(TAG, "Starting Zigbee stack");
     ESP_ERROR_CHECK(esp_zb_start(false));
+
+    // Set Zigbee TX power to maximum (20 dBm) for better range
+    esp_zb_set_tx_power(20);
+    ESP_LOGI(TAG, "Zigbee TX power set to maximum (20 dBm)");
+
     esp_zb_main_loop_iteration();
 }
 
@@ -428,6 +464,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     // Initialize hardware
+    setup_external_antenna();
     setup_relay_pin();
     setup_led();
 

@@ -14,6 +14,10 @@
 
 static const char *TAG = "xiao_zigbee";
 
+// Antenna configuration
+#define RF_SWITCH_PIN GPIO_NUM_3       // RF switch power
+#define ANTENNA_SELECT_PIN GPIO_NUM_14 // External antenna select
+
 // UART pins for communication with TinyS3
 #define UART_TX_PIN GPIO_NUM_16  // TX to TinyS3 (D6)
 #define UART_RX_PIN GPIO_NUM_17  // RX from TinyS3 (D7)
@@ -87,6 +91,33 @@ void setup_uart(void)
     ESP_LOGI(TAG, "UART initialized (TX:%d, RX:%d) for TinyS3 communication", UART_TX_PIN, UART_RX_PIN);
 }
 
+void setup_external_antenna(void)
+{
+    // Configure RF switch power (GPIO3)
+    gpio_config_t rf_switch_conf = {
+        .pin_bit_mask = (1ULL << RF_SWITCH_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&rf_switch_conf);
+    gpio_set_level(RF_SWITCH_PIN, 0);  // Power on (LOW)
+
+    // Configure antenna select (GPIO14)
+    gpio_config_t antenna_conf = {
+        .pin_bit_mask = (1ULL << ANTENNA_SELECT_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&antenna_conf);
+    gpio_set_level(ANTENNA_SELECT_PIN, 1);  // Select external antenna (HIGH)
+
+    ESP_LOGI(TAG, "External antenna configured");
+}
+
 void uart_send_device_status(void)
 {
     // Frame format: 0xAA CMD_STATUS_RESPONSE flags(2 bytes) 0x55
@@ -155,6 +186,8 @@ void check_device_signal_strength(void)
     esp_zb_nwk_neighbor_info_t nbr_info;
     bool found_any = false;
     int total_devices = 0;
+    bool found_scarecrow = false;
+    bool found_tombstone = false;
 
     while (esp_zb_nwk_get_next_neighbor(&iterator, &nbr_info) == ESP_OK) {
         total_devices++;
@@ -192,23 +225,28 @@ void check_device_signal_strength(void)
             device_name = "Pumpkin Scarecrow";
             is_known = true;
 
-            // Auto-register if not already registered
-            if (halloween_trigger.short_addr == 0 || !halloween_trigger.is_bound) {
-                halloween_trigger.short_addr = nbr_info.short_addr;
-                halloween_trigger.ieee_addr = ieee_addr;
-                halloween_trigger.endpoint = 1;
-                halloween_trigger.is_bound = true;
+            // Only mark as found if signal values are valid (device is actually online)
+            if (has_valid_signals) {
+                found_scarecrow = true;
 
-                ESP_LOGI(TAG, "Auto-registered Haunted Pumpkin Scarecrow (0x%04x, ieee=0x%016llx)",
-                         nbr_info.short_addr, ieee_addr);
+                // Auto-register if not already registered (only when signals are valid)
+                if (halloween_trigger.short_addr == 0 || !halloween_trigger.is_bound) {
+                    halloween_trigger.short_addr = nbr_info.short_addr;
+                    halloween_trigger.ieee_addr = ieee_addr;
+                    halloween_trigger.endpoint = 1;
+                    halloween_trigger.is_bound = true;
 
-                // Send time sync to newly registered device
-                zigbee_send_time_sync_to_device(nbr_info.short_addr, 1, "Haunted Pumpkin Scarecrow");
-                halloween_trigger.time_synced = true;
-                halloween_trigger.last_time_sync = time(NULL);
+                    ESP_LOGI(TAG, "Auto-registered Haunted Pumpkin Scarecrow (0x%04x, ieee=0x%016llx)",
+                             nbr_info.short_addr, ieee_addr);
 
-                // Notify TinyS3
-                uart_send_device_event(CMD_DEVICE_JOINED, DEVICE_ID_HALLOWEEN);
+                    // Send time sync to newly registered device
+                    zigbee_send_time_sync_to_device(nbr_info.short_addr, 1, "Haunted Pumpkin Scarecrow");
+                    halloween_trigger.time_synced = true;
+                    halloween_trigger.last_time_sync = time(NULL);
+
+                    // Notify TinyS3
+                    uart_send_device_event(CMD_DEVICE_JOINED, DEVICE_ID_HALLOWEEN);
+                }
             }
 
             is_synced = halloween_trigger.time_synced;
@@ -216,23 +254,28 @@ void check_device_signal_strength(void)
             device_name = "RIP";
             is_known = true;
 
-            // Auto-register if not already registered
-            if (rip_tombstone.short_addr == 0 || !rip_tombstone.is_bound) {
-                rip_tombstone.short_addr = nbr_info.short_addr;
-                rip_tombstone.ieee_addr = ieee_addr;
-                rip_tombstone.endpoint = 1;
-                rip_tombstone.is_bound = true;
+            // Only mark as found if signal values are valid (device is actually online)
+            if (has_valid_signals) {
+                found_tombstone = true;
 
-                ESP_LOGI(TAG, "Auto-registered RIP Tombstone (0x%04x, ieee=0x%016llx)",
-                         nbr_info.short_addr, ieee_addr);
+                // Auto-register if not already registered (only when signals are valid)
+                if (rip_tombstone.short_addr == 0 || !rip_tombstone.is_bound) {
+                    rip_tombstone.short_addr = nbr_info.short_addr;
+                    rip_tombstone.ieee_addr = ieee_addr;
+                    rip_tombstone.endpoint = 1;
+                    rip_tombstone.is_bound = true;
 
-                // Send time sync to newly registered device
-                zigbee_send_time_sync_to_device(nbr_info.short_addr, 1, "RIP Tombstone");
-                rip_tombstone.time_synced = true;
-                rip_tombstone.last_time_sync = time(NULL);
+                    ESP_LOGI(TAG, "Auto-registered RIP Tombstone (0x%04x, ieee=0x%016llx)",
+                             nbr_info.short_addr, ieee_addr);
 
-                // Notify TinyS3
-                uart_send_device_event(CMD_DEVICE_JOINED, DEVICE_ID_RIP);
+                    // Send time sync to newly registered device
+                    zigbee_send_time_sync_to_device(nbr_info.short_addr, 1, "RIP Tombstone");
+                    rip_tombstone.time_synced = true;
+                    rip_tombstone.last_time_sync = time(NULL);
+
+                    // Notify TinyS3
+                    uart_send_device_event(CMD_DEVICE_JOINED, DEVICE_ID_RIP);
+                }
             }
 
             is_synced = rip_tombstone.time_synced;
@@ -259,6 +302,23 @@ void check_device_signal_strength(void)
         ESP_LOGI(TAG, "No devices in neighbor table");
     } else if (!found_any) {
         ESP_LOGI(TAG, "Found %d device(s) in neighbor table, but none with valid signal values", total_devices);
+    }
+
+    // Check if previously connected devices are now missing from neighbor table
+    if (!found_scarecrow && halloween_trigger.is_bound) {
+        ESP_LOGW(TAG, "Haunted Pumpkin Scarecrow disconnected (not in neighbor table)");
+        halloween_trigger.is_bound = false;
+        halloween_trigger.short_addr = 0;
+        halloween_trigger.time_synced = false;
+        uart_send_device_event(CMD_DEVICE_LEFT, DEVICE_ID_HALLOWEEN);
+    }
+
+    if (!found_tombstone && rip_tombstone.is_bound) {
+        ESP_LOGW(TAG, "RIP Tombstone disconnected (not in neighbor table)");
+        rip_tombstone.is_bound = false;
+        rip_tombstone.short_addr = 0;
+        rip_tombstone.time_synced = false;
+        uart_send_device_event(CMD_DEVICE_LEFT, DEVICE_ID_RIP);
     }
 }
 
@@ -565,6 +625,31 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
         }
         break;
 
+    case ESP_ZB_ZDO_DEVICE_UNAVAILABLE:
+        {
+            esp_zb_zdo_signal_device_annce_params_t *dev_params = (esp_zb_zdo_signal_device_annce_params_t *)esp_zb_app_signal_get_params(p_sg_p);
+            if (dev_params) {
+                uint16_t short_addr = dev_params->device_short_addr;
+                ESP_LOGI(TAG, "Device unavailable: short=0x%04x", short_addr);
+
+                // Mark device as disconnected if it matches one of our known devices
+                if (halloween_trigger.is_bound && halloween_trigger.short_addr == short_addr) {
+                    halloween_trigger.is_bound = false;
+                    halloween_trigger.short_addr = 0;
+                    halloween_trigger.time_synced = false;
+                    ESP_LOGI(TAG, "Haunted Pumpkin Scarecrow marked unavailable");
+                    uart_send_device_event(CMD_DEVICE_LEFT, DEVICE_ID_HALLOWEEN);
+                } else if (rip_tombstone.is_bound && rip_tombstone.short_addr == short_addr) {
+                    rip_tombstone.is_bound = false;
+                    rip_tombstone.short_addr = 0;
+                    rip_tombstone.time_synced = false;
+                    ESP_LOGI(TAG, "RIP Tombstone marked unavailable");
+                    uart_send_device_event(CMD_DEVICE_LEFT, DEVICE_ID_RIP);
+                }
+            }
+        }
+        break;
+
     default:
         ESP_LOGI(TAG, "ZDO signal: %s (0x%x), status: %s", esp_zb_zdo_signal_to_string(sig_type), sig_type,
                  esp_err_to_name(err_status));
@@ -645,6 +730,11 @@ static void esp_zb_task(void *pvParameters)
 
     ESP_LOGI(TAG, "Starting Zigbee coordinator on channel %d", ZIGBEE_CHANNEL);
     ESP_ERROR_CHECK(esp_zb_start(false));
+
+    // Set Zigbee TX power to maximum (20 dBm) for better range
+    esp_zb_set_tx_power(20);
+    ESP_LOGI(TAG, "Zigbee TX power set to maximum (20 dBm)");
+
     esp_zb_main_loop_iteration();
 }
 
@@ -750,7 +840,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // Initialize UART for TinyS3 communication
+    // Initialize hardware
+    setup_external_antenna();
     setup_uart();
 
     // Initialize device records

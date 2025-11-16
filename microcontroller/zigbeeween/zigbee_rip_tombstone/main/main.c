@@ -21,6 +21,8 @@ static const char *TAG = "rip_tombstone";
 #define LED_PIN GPIO_NUM_15           // Built-in yellow LED on Xiao ESP32-C6
 #define NEOPIXEL_PIN GPIO_NUM_19      // NeoPixel strip data pin
 #define NEOPIXEL_COUNT 10             // 10 LEDs in the strip
+#define RF_SWITCH_PIN GPIO_NUM_3      // RF switch power
+#define ANTENNA_SELECT_PIN GPIO_NUM_14 // External antenna select
 
 // Sleep hours (12am to 6am)
 #define SLEEP_START_HOUR 0
@@ -120,6 +122,33 @@ void setup_led(void)
     gpio_set_level(LED_PIN, 0);
 
     ESP_LOGI(TAG, "Yellow LED initialized on GPIO%d", LED_PIN);
+}
+
+void setup_external_antenna(void)
+{
+    // Configure RF switch power (GPIO3)
+    gpio_config_t rf_switch_conf = {
+        .pin_bit_mask = (1ULL << RF_SWITCH_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&rf_switch_conf);
+    gpio_set_level(RF_SWITCH_PIN, 0);  // Power on (LOW)
+
+    // Configure antenna select (GPIO14)
+    gpio_config_t antenna_conf = {
+        .pin_bit_mask = (1ULL << ANTENNA_SELECT_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&antenna_conf);
+    gpio_set_level(ANTENNA_SELECT_PIN, 1);  // Select external antenna (HIGH)
+
+    ESP_LOGI(TAG, "External antenna configured");
 }
 
 void setup_neopixels(void)
@@ -325,10 +354,10 @@ void motion_detection_task(void *pvParameters)
                 // Always try to trigger the haunted scarecrow on ANY motion
                 trigger_haunted_scarecrow();
 
-                // Start cooldown timer (2 minutes)
+                // Start cooldown timer (10 seconds)
                 if (cooldown_timer != NULL) {
                     esp_timer_stop(cooldown_timer);
-                    esp_timer_start_once(cooldown_timer, 120000000); // 2 minutes
+                    esp_timer_start_once(cooldown_timer, 10000000); // 10 seconds
                 }
             }
         } else {
@@ -441,12 +470,14 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
 
 static void esp_zb_task(void *pvParameters)
 {
-    // Initialize Zigbee end device configuration
+    // Initialize Zigbee router configuration
     esp_zb_cfg_t zb_nwk_cfg;
-    zb_nwk_cfg.esp_zb_role = ESP_ZB_DEVICE_TYPE_ED;
+    zb_nwk_cfg.esp_zb_role = ESP_ZB_DEVICE_TYPE_ROUTER;
     zb_nwk_cfg.install_code_policy = false;
     zb_nwk_cfg.nwk_cfg.zed_cfg.ed_timeout = ESP_ZB_ED_AGING_TIMEOUT_64MIN;
     zb_nwk_cfg.nwk_cfg.zed_cfg.keep_alive = 3000;
+
+    ESP_LOGI(TAG, "Initializing Zigbee stack as ROUTER");
     esp_zb_init(&zb_nwk_cfg);
 
     // Create endpoint list
@@ -511,6 +542,11 @@ static void esp_zb_task(void *pvParameters)
 
     ESP_LOGI(TAG, "Starting Zigbee stack");
     ESP_ERROR_CHECK(esp_zb_start(false));
+
+    // Set Zigbee TX power to maximum (20 dBm) for better range
+    esp_zb_set_tx_power(20);
+    ESP_LOGI(TAG, "Zigbee TX power set to maximum (20 dBm)");
+
     esp_zb_main_loop_iteration();
 }
 
@@ -567,6 +603,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     // Initialize hardware
+    setup_external_antenna();
     setup_pir();
     setup_led();
     setup_neopixels();
