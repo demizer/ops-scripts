@@ -1,3 +1,4 @@
 *.log
 microcontroller/zigbeeween/.circuitpy-libs
 microcontroller/zigbeeween/zigbee_haunted_pumpkin_scarecrow/.cache/clangd/index
+__pycache__

@@ -3,7 +3,7 @@ Description=Immich Redis
 After=local-fs.target
 
 [Container]
-Image=docker.io/redis:6.2-alpine
+Image=docker.io/valkey/valkey:8@sha256:81db6d39e1bba3b3ff32bd3a1b19a6d69690f94a3954ec131277b9a26b95b3aa
 ContainerName=immich-redis
 Pod=immich.pod
 HealthCmd=redis-cli ping || exit 1

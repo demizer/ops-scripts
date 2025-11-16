@@ -3,7 +3,7 @@ Description=Immich Machine Learning
 After=local-fs.target
 
 [Container]
-Image=ghcr.io/immich-app/immich-machine-learning:release
+Image=ghcr.io/immich-app/immich-machine-learning:v2.2.3
 ContainerName=immich-machine-learning
 Pod=immich.pod
 Volume=immich-model-cache:/cache:Z

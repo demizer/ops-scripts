@@ -28,23 +28,17 @@ Features:
 # ///
 
 import argparse
-import difflib
 import json
-import logging
 import shutil
 import socket
-import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
-from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.prompt import Confirm
-from rich.syntax import Syntax
-from rich.text import Text
-from rich.theme import Theme
+
+# Import common utilities
+import setup_common
 
 # Global configuration
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -61,77 +55,9 @@ DRY_RUN = False
 DEBUG = False
 SYNC_MODE = False
 
-# Create custom theme with specific colors for log levels
-custom_theme = Theme({
-    "logging.level.debug": "cyan",
-    "logging.level.info": "green",
-    "logging.level.warning": "yellow",
-    "logging.level.error": "red bold",
-    "logging.level.critical": "red on white bold"
-})
-
-# Create console with custom theme
-console = Console(theme=custom_theme)
-
-# Use themed console in RichHandler with markup enabled
-handler = RichHandler(console=console, markup=True)
-
-logging.basicConfig(
-    level="DEBUG",
-    format="%(message)s",
-    handlers=[handler]
-)
-
-log = logging.getLogger(__name__)
-
-
-def run_cmd(cmd: list[str]) -> int:
-    """Execute command with output"""
-    if DRY_RUN:
-        log.warning(f"[yellow]NORUN:[/] [dim]{' '.join(cmd)}[/]", stacklevel=2)
-        return 0
-    else:
-        log.info(f"[bold green]Running command:[/] [cyan]{' '.join(cmd)}[/]", stacklevel=2)
-
-        result = subprocess.run(cmd, capture_output=False, text=True)
-        exit_code = result.returncode
-
-        log.info(f"[bold]Command returned:[/] [green]{exit_code}[/]" if exit_code == 0 else f"[bold]Command returned:[/] [red]{exit_code}[/]", stacklevel=2)
-        return exit_code
-
-
-def run_cmd_quiet(cmd: list[str]) -> int:
-    """Execute command quietly"""
-    if DRY_RUN:
-        log.warning(f"[yellow]NORUN:[/] [dim]{' '.join(cmd)}[/]", stacklevel=2)
-        return 0
-    else:
-        log.info(f"[bold green]Running command:[/] [cyan]{' '.join(cmd)}[/]", stacklevel=2)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        exit_code = result.returncode
-
-        log.info(f"[bold]Command returned:[/] [green]{exit_code}[/]" if exit_code == 0 else f"[bold]Command returned:[/] [red]{exit_code}[/]", stacklevel=2)
-
-        if exit_code != 0:
-            log.error(f"[bold red]Command failed with exit code[/] [red on white]{exit_code}[/]", stacklevel=2)
-            if result.stderr:
-                log.error(result.stderr, stacklevel=2)
-            sys.exit(1)
-
-        return exit_code
-
-
-def ensure_dir_exists(directory: Path) -> None:
-    """Ensure directory exists"""
-    if not directory.exists():
-        log.info(f"[blue]Creating directory[/] [bold cyan]{directory}[/]", stacklevel=2)
-        if not DRY_RUN:
-            directory.mkdir(parents=True, exist_ok=True)
-        else:
-            log.warning(f"[yellow]NORUN:[/] [dim]mkdir -p '{directory}'[/]", stacklevel=2)
-    else:
-        log.debug(f"Directory {directory} already exists", stacklevel=2)
+# Use console and log from setup_common
+console = setup_common.console
+log = setup_common.log
 
 
 def file_exists(file_path: Path) -> bool:
@@ -177,142 +103,11 @@ def check_lazy_lock_diff(source: Path, dest: Path) -> str:
         return 'error'
 
 
-def show_file_diff(source: Path, dest: Path) -> None:
-    """Show diff between two files"""
-    log.info(f"Showing diff between {source} and {dest}", stacklevel=2)
-
-    if DRY_RUN:
-        log.warning("NORUN: show diff between files", stacklevel=2)
-        return
-
-    if not dest.exists():
-        log.warning(f"Destination file {dest} does not exist", stacklevel=2)
-        return
-
-    try:
-        # Get modification times
-        source_mtime = source.stat().st_mtime
-        dest_mtime = dest.stat().st_mtime
-        source_time = datetime.fromtimestamp(source_mtime).strftime('%Y-%m-%d %H:%M:%S')
-        dest_time = datetime.fromtimestamp(dest_mtime).strftime('%Y-%m-%d %H:%M:%S')
-
-        if source_mtime > dest_mtime:
-            log.info(f"[cyan]Source[/] [bold]{source}[/] [cyan]is newer[/] [dim]({source_time})[/]", stacklevel=2)
-            log.info(f"[cyan]Dest[/] [bold]{dest}[/] [cyan]is older[/] [dim]({dest_time})[/]", stacklevel=2)
-        elif dest_mtime > source_mtime:
-            log.info(f"[cyan]Dest[/] [bold]{dest}[/] [cyan]is newer[/] [dim]({dest_time})[/]", stacklevel=2)
-            log.info(f"[cyan]Source[/] [bold]{source}[/] [cyan]is older[/] [dim]({source_time})[/]", stacklevel=2)
-        else:
-            log.info(f"[cyan]Both files have same modification time[/] [dim]({source_time})[/]", stacklevel=2)
-
-        with open(source, 'r') as f:
-            source_lines = f.readlines()
-        with open(dest, 'r') as f:
-            dest_lines = f.readlines()
-
-        diff = list(difflib.unified_diff(
-            dest_lines, source_lines,
-            fromfile=str(dest), tofile=str(source),
-            lineterm=''
-        ))
-
-        if diff:
-            diff_text = '\n'.join(diff)
-            syntax = Syntax(diff_text, "diff", theme="monokai", line_numbers=False)
-            console.log(Panel(syntax, title="File Differences", border_style="bold blue"))
-        else:
-            console.log("Files are identical", style="green")
-
-    except Exception as e:
-        log.error(f"Could not show diff: {e}", stacklevel=2)
-
-
-def ensure_copy(source: Path, dest: Path) -> None:
-    """Copy file from source to destination with checks"""
-    log.debug(f"ensure_copy: source={source}, dest={dest}", stacklevel=2)
-
-    if not source.exists():
-        log.error(f"[bold red]Source file does not exist:[/] [red]{source}[/]", stacklevel=2)
-        sys.exit(1)
-
-    should_copy = False
-
-    if dest.is_symlink():
-        current_target = dest.readlink()
-        log.info(f"[magenta]Replacing symlink[/] [bold]{dest}[/] [dim](currently points to {current_target})[/]", stacklevel=2)
-        log.debug(f"ensure_copy: Removing existing symlink: {dest}", stacklevel=2)
-        if not DRY_RUN:
-            dest.unlink()
-        should_copy = True
-    elif dest.exists():
-        # Check if files are different
-        if source.read_bytes() == dest.read_bytes():
-            log.debug(f"File {dest} already exists and matches source", stacklevel=2)
-            return
-        else:
-            log.warning(f"[yellow]File[/] [bold]'{dest}'[/] [yellow]exists but differs from source.[/]", stacklevel=2)
-            show_file_diff(source, dest)
-
-            if Confirm.ask("Copy source file over destination?", default=False):
-                should_copy = True
-            else:
-                log.info(f"[dim]Skipping copy of[/] [bold]{dest}[/]", stacklevel=2)
-                return
-    else:
-        log.info(f"[blue]File[/] [bold]{dest}[/] [blue]does not exist, will create[/]", stacklevel=2)
-        should_copy = True
-
-    if should_copy:
-        log.info(f"[green]Copying[/] [bold cyan]{source}[/] [green]to[/] [bold cyan]{dest}[/]", stacklevel=2)
-        # Ensure parent directory exists
-        ensure_dir_exists(dest.parent)
-
-        if DRY_RUN:
-            log.warning(f"[yellow]NORUN:[/] [dim]cp '{source}' '{dest}'[/]", stacklevel=2)
-        else:
-            shutil.copy2(source, dest)
 
 
 def is_work_host(hostname: str) -> bool:
     """Check if hostname is a work host"""
     return any(work_host in hostname for work_host in WORK_HOSTS)
-
-
-def detect_file_changes(home_file: Path, dotfiles_file: Path) -> bool:
-    """Detect if files have changed"""
-    if not home_file.exists():
-        log.debug(f"Home file does not exist: {home_file}", stacklevel=2)
-        return False
-
-    if not dotfiles_file.exists():
-        log.debug(f"Dotfiles file does not exist: {dotfiles_file}", stacklevel=2)
-        return False
-
-    # Compare files
-    if home_file.read_bytes() == dotfiles_file.read_bytes():
-        log.debug(f"Files are identical: {home_file} and {dotfiles_file}", stacklevel=2)
-        return False
-    else:
-        log.debug(f"Files differ: {home_file} and {dotfiles_file}", stacklevel=2)
-        return True
-
-
-def sync_file_back(home_file: Path, dotfiles_file: Path, description: str) -> bool:
-    """Sync file back from home to dotfiles"""
-    if detect_file_changes(home_file, dotfiles_file):
-        log.warning(f"[yellow]File[/] [bold]'{description}'[/] [yellow]has changed in home directory[/]", stacklevel=2)
-        show_file_diff(dotfiles_file, home_file)
-
-        if Confirm.ask("Sync changes back to dotfiles?", default=False):
-            log.info(f"[green]Syncing[/] [bold cyan]{home_file}[/] [green]back to[/] [bold cyan]{dotfiles_file}[/]", stacklevel=2)
-            if DRY_RUN:
-                log.warning(f"[yellow]NORUN:[/] [dim]cp '{home_file}' '{dotfiles_file}'[/]", stacklevel=2)
-            else:
-                shutil.copy2(home_file, dotfiles_file)
-            return True
-        else:
-            log.info(f"[dim]Skipping sync of[/] [bold]{description}[/]", stacklevel=2)
-    return False
 
 
 def setup_general_dotfiles() -> None:
@@ -323,20 +118,20 @@ def setup_general_dotfiles() -> None:
 
     if is_work_host(SETUP_HOST):
         log.info("[bold blue]Setup gitconfig[/] [yellow](work)[/]")
-        ensure_copy(DOTFILES_DIR / "gitconfig-work", home / ".gitconfig")
+        setup_common.ensure_copy(DOTFILES_DIR / "gitconfig-work", home / ".gitconfig", dry_run=DRY_RUN)
     else:
         log.info("[bold blue]Setup gitconfig[/]")
-        ensure_copy(DOTFILES_DIR / "gitconfig", home / ".gitconfig")
+        setup_common.ensure_copy(DOTFILES_DIR / "gitconfig", home / ".gitconfig", dry_run=DRY_RUN)
 
         log.info("[bold blue]Setup abcde.conf[/]")
-        ensure_copy(DOTFILES_DIR / "abcde.conf", home / ".abcde.conf")
+        setup_common.ensure_copy(DOTFILES_DIR / "abcde.conf", home / ".abcde.conf", dry_run=DRY_RUN)
 
     if "km.nvidia.com" not in SETUP_HOST:
-        ensure_copy(DOTFILES_DIR / "pypi.rc", home / ".pypi.rc")
-        ensure_copy(DOTFILES_DIR / "language-server.json", home / ".config" / "language-server.json")
+        setup_common.ensure_copy(DOTFILES_DIR / "pypi.rc", home / ".pypi.rc", dry_run=DRY_RUN)
+        setup_common.ensure_copy(DOTFILES_DIR / "language-server.json", home / ".config" / "language-server.json", dry_run=DRY_RUN)
 
         msmtprc_dest = home / ".msmtprc"
-        ensure_copy(DOTFILES_DIR / "msmtprc", msmtprc_dest)
+        setup_common.ensure_copy(DOTFILES_DIR / "msmtprc", msmtprc_dest, dry_run=DRY_RUN)
         if not DRY_RUN:
             msmtprc_dest.chmod(0o600)
         else:
@@ -352,11 +147,11 @@ def setup_fish_dotfiles() -> None:
     fish_confd_dir = fish_config_dir / "conf.d"
 
     log.info("[bold blue]Setup fish config files[/]")
-    ensure_dir_exists(fish_config_dir)
-    ensure_dir_exists(fish_confd_dir)
+    setup_common.ensure_dir_exists(fish_config_dir, dry_run=DRY_RUN)
+    setup_common.ensure_dir_exists(fish_confd_dir, dry_run=DRY_RUN)
 
-    ensure_copy(DOTFILES_DIR / "fish-config.fish", fish_config_dir / "config.fish")
-    ensure_copy(DOTFILES_DIR / "fish-config-linux.fish", fish_config_dir / "config-linux.fish")
+    setup_common.ensure_copy(DOTFILES_DIR / "fish-config.fish", fish_config_dir / "config.fish", dry_run=DRY_RUN)
+    setup_common.ensure_copy(DOTFILES_DIR / "fish-config-linux.fish", fish_config_dir / "config-linux.fish", dry_run=DRY_RUN)
 
     log.info("[bold blue]Setup fish conf.d files[/]")
     conf_files = [
@@ -368,11 +163,11 @@ def setup_fish_dotfiles() -> None:
     ]
 
     for conf_file in conf_files:
-        ensure_copy(DOTFILES_DIR / f"fish-{conf_file}", fish_confd_dir / conf_file)
+        setup_common.ensure_copy(DOTFILES_DIR / f"fish-{conf_file}", fish_confd_dir / conf_file, dry_run=DRY_RUN)
 
     # Check if fisher is installed
     log.info("[bold blue]Checking for fisher[/]")
-    fisher_check_exit = run_cmd(["fish", "-c", "fisher -v > /dev/null 2>&1"])
+    fisher_check_exit = setup_common.run_cmd(["fish", "-c", "fisher -v > /dev/null 2>&1"], dry_run=DRY_RUN)
 
     if fisher_check_exit != 0:
         log.info("[yellow]Fisher not installed, installing...[/]")
@@ -381,11 +176,11 @@ def setup_fish_dotfiles() -> None:
         fisher_installer = "/tmp/fisher-install"
 
         log.info(f"[cyan]Downloading fisher from {fisher_url}[/]")
-        run_cmd_quiet(["wget", "-q", "-O", fisher_installer, fisher_url])
+        setup_common.run_cmd_quiet(["wget", "-q", "-O", fisher_installer, fisher_url], dry_run=DRY_RUN)
 
         # Install fisher
         log.info("[cyan]Installing fisher[/]")
-        run_cmd_quiet(["fish", "-c", f"source {fisher_installer} && fisher install jorgebucaran/fisher"])
+        setup_common.run_cmd_quiet(["fish", "-c", f"source {fisher_installer} && fisher install jorgebucaran/fisher"], dry_run=DRY_RUN)
         log.info("[green]Fisher installed successfully[/]")
     else:
         log.info("[green]Fisher is already installed[/]")
@@ -400,7 +195,7 @@ def setup_fish_dotfiles() -> None:
 
     for plugin in plugins:
         log.info(f"[cyan]Installing plugin: {plugin}[/]")
-        run_cmd_quiet(["fish", "-c", f"fisher install {plugin}"])
+        setup_common.run_cmd_quiet(["fish", "-c", f"fisher install {plugin}"], dry_run=DRY_RUN)
         log.info(f"[green]Plugin {plugin} installed successfully[/]")
 
 
@@ -409,9 +204,9 @@ def setup_kitty_dotfiles() -> None:
     log.info("[bold blue]Setup kitty config[/]")
     home = Path.home()
     kitty_config_dir = home / ".config" / "kitty"
-    ensure_dir_exists(kitty_config_dir)
+    setup_common.ensure_dir_exists(kitty_config_dir, dry_run=DRY_RUN)
 
-    ensure_copy(DOTFILES_DIR / "kitty.conf", kitty_config_dir / "kitty.conf")
+    setup_common.ensure_copy(DOTFILES_DIR / "kitty.conf", kitty_config_dir / "kitty.conf", dry_run=DRY_RUN)
 
 
 def setup_ssh_dotfiles() -> None:
@@ -419,16 +214,16 @@ def setup_ssh_dotfiles() -> None:
     log.info("[bold blue]Setup SSH config[/]")
     home = Path.home()
     ssh_dir = home / ".ssh"
-    ensure_dir_exists(ssh_dir)
+    setup_common.ensure_dir_exists(ssh_dir, dry_run=DRY_RUN)
 
     ssh_config = ssh_dir / "config"
 
     if is_work_host(SETUP_HOST):
         log.info("[bold blue]Setup SSH config[/] [yellow](work)[/]")
-        ensure_copy(DOTFILES_DIR / "ssh-config-work", ssh_config)
+        setup_common.ensure_copy(DOTFILES_DIR / "ssh-config-work", ssh_config, dry_run=DRY_RUN)
     else:
         log.info("[bold blue]Setup SSH config[/]")
-        ensure_copy(DOTFILES_DIR / "ssh-config", ssh_config)
+        setup_common.ensure_copy(DOTFILES_DIR / "ssh-config", ssh_config, dry_run=DRY_RUN)
 
     # Set appropriate permissions
     if not DRY_RUN:
@@ -441,7 +236,7 @@ def setup_tmux_dotfiles() -> None:
     """Setup tmux dotfiles"""
     log.info("[bold blue]Setup tmux.conf[/]")
     home = Path.home()
-    ensure_copy(DOTFILES_DIR / "tmux.conf", home / ".tmux.conf")
+    setup_common.ensure_copy(DOTFILES_DIR / "tmux.conf", home / ".tmux.conf", dry_run=DRY_RUN)
 
 
 def setup_neovim_dotfiles() -> None:
@@ -452,11 +247,11 @@ def setup_neovim_dotfiles() -> None:
     nvim_config_dir = home / ".config" / "nvim"
 
     log.info("[bold blue]Creating Neovim configuration directory[/]")
-    ensure_dir_exists(nvim_config_dir)
+    setup_common.ensure_dir_exists(nvim_config_dir, dry_run=DRY_RUN)
 
     # Create directories for backups, swapfiles, and undo
     for subdir in ["backups", "swapfiles", "undodir", "lazygit"]:
-        ensure_dir_exists(nvim_config_dir / subdir)
+        setup_common.ensure_dir_exists(nvim_config_dir / subdir, dry_run=DRY_RUN)
 
     # Copy the existing neovim-init.lua as init.lua
     init_lua_path = nvim_config_dir / "init.lua"
@@ -464,10 +259,10 @@ def setup_neovim_dotfiles() -> None:
 
     if nvim_lua_path.exists():
         log.info("[bold blue]Setup neovim-init.lua as init.lua[/]")
-        ensure_copy(nvim_lua_path, init_lua_path)
+        setup_common.ensure_copy(nvim_lua_path, init_lua_path, dry_run=DRY_RUN)
     else:
         log.warning("[yellow]neovim-init.lua not found, creating minimal init.lua[/]")
-        ensure_dir_exists(init_lua_path.parent)
+        setup_common.ensure_dir_exists(init_lua_path.parent, dry_run=DRY_RUN)
 
         minimal_config = """-- Minimal Neovim configuration
 vim.opt.number = true
@@ -496,7 +291,7 @@ vim.opt.shiftwidth = 4
                 log.debug("lazy-lock.json files are identical")
             elif diff_type == 'only-lazy':
                 log.info("[cyan]The only difference is the lazy.nvim plugin version[/]")
-                show_file_diff(lazy_lock_src, lazy_lock_dest)
+                setup_common.show_file_diff(lazy_lock_src, lazy_lock_dest, dry_run=DRY_RUN)
 
                 try:
                     if Confirm.ask("Update source dotfiles with newer lazy.nvim version?", default=True):
@@ -527,13 +322,13 @@ vim.opt.shiftwidth = 4
                 else:
                     log.warning(f"[yellow]NORUN:[/] [dim]rm -rf '{lazy_plugins_dir}'[/]")
 
-        ensure_copy(lazy_lock_src, lazy_lock_dest)
+        setup_common.ensure_copy(lazy_lock_src, lazy_lock_dest, dry_run=DRY_RUN)
     else:
         log.info("[dim]neovim-lazy-lock.json not found, skipping[/]")
 
     # Copy ctags configuration
     log.info("[bold blue]Setup ctags conf[/]")
-    ensure_copy(DOTFILES_DIR / "ctags", home / ".ctags")
+    setup_common.ensure_copy(DOTFILES_DIR / "ctags", home / ".ctags", dry_run=DRY_RUN)
 
     # Create lazygit config if it doesn't exist
     lazygit_config = nvim_config_dir / "lazygit" / "config.yml"
@@ -581,7 +376,7 @@ def sync_dotfiles_back() -> None:
         ))
 
     for home_file, dotfiles_file, description in files_to_check:
-        if sync_file_back(home_file, dotfiles_file, description):
+        if setup_common.sync_file_back(home_file, dotfiles_file, description, dry_run=DRY_RUN):
             synced_count += 1
 
     if synced_count > 0:

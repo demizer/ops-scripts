@@ -71,3 +71,55 @@ dotfiles-sync:
 # Show help for dotfiles setup script
 dotfiles-help:
     uv run ./setup-dotfiles.py -h
+
+# ============================================================================
+# Container Management
+# ============================================================================
+
+# Install container systemd units using setup-containers.py
+install-containers:
+    uv run ./setup-containers.py
+
+# Dry run container installation (preview changes without applying)
+containers-preview:
+    uv run ./setup-containers.py -d -n
+
+# Sync changes from deployed system back to container sources
+containers-sync:
+    uv run ./setup-containers.py -s
+
+# Show help for container setup script
+containers-help:
+    uv run ./setup-containers.py -h
+
+# ============================================================================
+# Backup Management
+# ============================================================================
+
+# Backup all Immich data (database, volumes, caches, configs)
+backup-immich:
+    uv run ./manage-backups.py backup-immich
+
+# Dry run Immich backup (preview without executing)
+backup-immich-preview:
+    uv run ./manage-backups.py backup-immich -d -n
+
+# List available Immich backups
+list-backups:
+    uv run ./manage-backups.py list-backups
+
+# ============================================================================
+# Immich Upgrade Management
+# ============================================================================
+
+# Upgrade Immich to specified version (e.g., just upgrade-immich v2.2.3)
+upgrade-immich VERSION:
+    uv run ./upgrade-immich.py {{VERSION}}
+
+# Dry run Immich upgrade (preview changes without applying)
+upgrade-immich-preview VERSION:
+    uv run ./upgrade-immich.py {{VERSION}} -d -n
+
+# List supported Immich upgrade paths
+upgrade-immich-list:
+    uv run ./upgrade-immich.py --list-versions

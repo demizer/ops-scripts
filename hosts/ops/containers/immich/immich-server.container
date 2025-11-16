@@ -4,7 +4,7 @@ After=local-fs.target
 Requires=immich-database.service immich-redis.service
 
 [Container]
-Image=ghcr.io/immich-app/immich-server:release
+Image=ghcr.io/immich-app/immich-server:v2.2.3
 ContainerName=immich-server
 Pod=immich.pod
 Environment=DB_HOSTNAME=localhost
@@ -12,7 +12,8 @@ Environment=DB_USERNAME=postgres
 Environment=DB_PASSWORD=postgres
 Environment=DB_DATABASE_NAME=immich
 Environment=REDIS_HOSTNAME=localhost
-Volume=/mnt/pictures/immich:/usr/src/app/upload:Z
+Volume=/mnt/pictures/immich:/data:Z
+Volume=/etc/localtime:/etc/localtime:ro
 
 [Install]
 WantedBy=default.target
