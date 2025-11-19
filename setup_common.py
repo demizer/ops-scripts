@@ -80,6 +80,16 @@ def run_cmd_quiet(cmd: list[str], dry_run: bool = False) -> int:
         return exit_code
 
 
+def run_cmd_quiet_check(cmd: list[str], dry_run: bool = False) -> int:
+    """Execute command quietly and return exit code without failing"""
+    if dry_run:
+        log.warning(f"[yellow]NORUN:[/] [dim]{' '.join(cmd)}[/]", stacklevel=2)
+        return 0
+    else:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode
+
+
 def ensure_dir_exists(directory: Path, dry_run: bool = False) -> None:
     """Ensure directory exists"""
     if not directory.exists():
@@ -95,10 +105,6 @@ def ensure_dir_exists(directory: Path, dry_run: bool = False) -> None:
 def show_file_diff(source: Path, dest: Path, dry_run: bool = False) -> None:
     """Show diff between two files"""
     log.info(f"Showing diff between {source} and {dest}", stacklevel=2)
-
-    if dry_run:
-        log.warning("NORUN: show diff between files", stacklevel=2)
-        return
 
     if not dest.exists():
         log.warning(f"Destination file {dest} does not exist", stacklevel=2)
@@ -171,7 +177,10 @@ def ensure_copy(source: Path, dest: Path, dry_run: bool = False) -> bool:
             log.warning(f"[yellow]File[/] [bold]'{dest}'[/] [yellow]exists but differs from source.[/]", stacklevel=2)
             show_file_diff(source, dest, dry_run)
 
-            if Confirm.ask("Copy source file over destination?", default=False):
+            if dry_run:
+                # In dry-run mode, assume we would copy
+                should_copy = True
+            elif Confirm.ask("Copy source file over destination?", default=False):
                 should_copy = True
             else:
                 log.info(f"[dim]Skipping copy of[/] [bold]{dest}[/]", stacklevel=2)
@@ -219,7 +228,7 @@ def sync_file_back(home_file: Path, dotfiles_file: Path, description: str, dry_r
         log.warning(f"[yellow]File[/] [bold]'{description}'[/] [yellow]has changed in home directory[/]", stacklevel=2)
         show_file_diff(dotfiles_file, home_file, dry_run)
 
-        if Confirm.ask("Sync changes back to dotfiles?", default=False):
+        if dry_run or Confirm.ask("Sync changes back to dotfiles?", default=False):
             log.info(f"[green]Syncing[/] [bold cyan]{home_file}[/] [green]back to[/] [bold cyan]{dotfiles_file}[/]", stacklevel=2)
             if dry_run:
                 log.warning(f"[yellow]NORUN:[/] [dim]cp '{home_file}' '{dotfiles_file}'[/]", stacklevel=2)

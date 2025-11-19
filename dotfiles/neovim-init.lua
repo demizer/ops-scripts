@@ -517,7 +517,9 @@ vim.opt.rtp:prepend(lazypath)
 
 -- Check for lazy-lock.json file for dependency locking
 local function check_lockfile()
+    local home = vim.fn.expand("~")
     local lockfile_paths = {
+        home .. "/ops-scripts/dotfiles/neovim-lazy-lock.json",
         "/mnt/backups/ops-scripts/dotfiles/neovim-lazy-lock.json"
     }
 

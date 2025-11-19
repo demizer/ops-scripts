@@ -28,7 +28,9 @@ Features:
 # ///
 
 import argparse
+from datetime import datetime
 import json
+import platform
 import shutil
 import socket
 import sys
@@ -110,6 +112,37 @@ def is_work_host(hostname: str) -> bool:
     return any(work_host in hostname for work_host in WORK_HOSTS)
 
 
+def check_and_install_macos_dependencies() -> None:
+    """Check and install required dependencies on macOS via Homebrew"""
+    if platform.system() != "Darwin":
+        return
+
+    console.log(Panel("CHECKING MACOS DEPENDENCIES", style="bold green"))
+
+    # Check if Homebrew is installed
+    log.info("[bold blue]Checking for Homebrew[/]")
+    brew_check = setup_common.run_cmd_quiet_check(["which", "brew"], dry_run=DRY_RUN)
+    if brew_check != 0:
+        log.error("[bold red]Homebrew is not installed.[/] Install from https://brew.sh")
+        sys.exit(1)
+
+    log.info("[green]Homebrew is installed[/]")
+
+    # List of required brew packages
+    required_packages = ["fish", "atuin", "lazygit"]
+
+    for package in required_packages:
+        log.info(f"[bold blue]Checking for {package}[/]")
+        check_exit = setup_common.run_cmd_quiet_check(["brew", "list", package], dry_run=DRY_RUN)
+
+        if check_exit != 0:
+            log.info(f"[yellow]{package} not installed, installing...[/]")
+            setup_common.run_cmd(["brew", "install", package], dry_run=DRY_RUN)
+            log.info(f"[green]{package} installed successfully[/]")
+        else:
+            log.info(f"[green]{package} is already installed[/]")
+
+
 def setup_general_dotfiles() -> None:
     """Setup general dotfiles"""
     console.log(Panel("GENERAL DOTFILES", style="bold green"))
@@ -176,7 +209,7 @@ def setup_fish_dotfiles() -> None:
         fisher_installer = "/tmp/fisher-install"
 
         log.info(f"[cyan]Downloading fisher from {fisher_url}[/]")
-        setup_common.run_cmd_quiet(["wget", "-q", "-O", fisher_installer, fisher_url], dry_run=DRY_RUN)
+        setup_common.run_cmd_quiet(["curl", "-fsSL", "-o", fisher_installer, fisher_url], dry_run=DRY_RUN)
 
         # Install fisher
         log.info("[cyan]Installing fisher[/]")
@@ -413,6 +446,9 @@ def main() -> None:
         console.log(Panel("SYNC MODE", style="bold green"))
     else:
         console.log(Panel("DEPLOY MODE", style="bold green"))
+
+    # Check and install dependencies on macOS
+    check_and_install_macos_dependencies()
 
     # Main deployment logic
     if SYNC_MODE:
