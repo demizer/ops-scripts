@@ -326,19 +326,20 @@ vim.opt.shiftwidth = 4
                 log.info("[cyan]The only difference is the lazy.nvim plugin version[/]")
                 setup_common.show_file_diff(lazy_lock_src, lazy_lock_dest, dry_run=DRY_RUN)
 
-                try:
-                    if Confirm.ask("Update source dotfiles with newer lazy.nvim version?", default=True):
-                        log.info(f"[green]Updating[/] [bold cyan]{lazy_lock_src}[/] [green]with[/] [bold cyan]{lazy_lock_dest}[/]")
-                        if not DRY_RUN:
+                if DRY_RUN:
+                    log.info("[dim]Would prompt: Update source dotfiles with newer lazy.nvim version?[/]")
+                    log.info("[dim]Will copy source over destination[/]")
+                else:
+                    try:
+                        if Confirm.ask("Update source dotfiles with newer lazy.nvim version?", default=True):
+                            log.info(f"[green]Updating[/] [bold cyan]{lazy_lock_src}[/] [green]with[/] [bold cyan]{lazy_lock_dest}[/]")
                             shutil.copy2(lazy_lock_dest, lazy_lock_src)
+                            return
                         else:
-                            log.warning(f"[yellow]NORUN:[/] [dim]cp '{lazy_lock_dest}' '{lazy_lock_src}'[/]")
+                            log.info("[dim]Will copy source over destination[/]")
+                    except KeyboardInterrupt:
+                        log.info("\n[dim]Interrupted, skipping lazy-lock.json[/]")
                         return
-                    else:
-                        log.info("[dim]Will copy source over destination[/]")
-                except KeyboardInterrupt:
-                    log.info("\n[dim]Interrupted, skipping lazy-lock.json[/]")
-                    return
 
             # If we got here, proceed with normal copy
             will_copy = lazy_lock_src.read_bytes() != lazy_lock_dest.read_bytes()
