@@ -4,7 +4,7 @@ After=local-fs.target
 Requires=immich-database.service immich-redis.service
 
 [Container]
-Image=ghcr.io/immich-app/immich-server:v2.2.3
+Image=ghcr.io/immich-app/immich-server:v2.3.1
 ContainerName=immich-server
 Pod=immich.pod
 Environment=DB_HOSTNAME=localhost
