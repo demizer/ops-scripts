@@ -34,6 +34,7 @@ import platform
 import shutil
 import socket
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from rich.panel import Panel
@@ -326,14 +327,16 @@ vim.opt.shiftwidth = 4
                 log.info("[cyan]The only difference is the lazy.nvim plugin version[/]")
                 setup_common.show_file_diff(lazy_lock_src, lazy_lock_dest, dry_run=DRY_RUN)
 
-                if DRY_RUN:
-                    log.info("[dim]Would prompt: Update source dotfiles with newer lazy.nvim version?[/]")
-                    log.info("[dim]Will copy source over destination[/]")
+                if not setup_common.is_interactive():
+                    log.warning("[yellow]Non-interactive mode: will copy source over destination[/]")
                 else:
                     try:
                         if Confirm.ask("Update source dotfiles with newer lazy.nvim version?", default=True):
                             log.info(f"[green]Updating[/] [bold cyan]{lazy_lock_src}[/] [green]with[/] [bold cyan]{lazy_lock_dest}[/]")
-                            shutil.copy2(lazy_lock_dest, lazy_lock_src)
+                            if not DRY_RUN:
+                                shutil.copy2(lazy_lock_dest, lazy_lock_src)
+                            else:
+                                log.warning(f"[yellow]NORUN:[/] [dim]cp '{lazy_lock_dest}' '{lazy_lock_src}'[/]")
                             return
                         else:
                             log.info("[dim]Will copy source over destination[/]")
@@ -382,24 +385,46 @@ def sync_dotfiles_back() -> None:
 
     log.info("[bold yellow]Checking for changes to sync back to dotfiles...[/]")
 
-    # Check general config files
-    files_to_check = [
-        (home / ".gitconfig", DOTFILES_DIR / "gitconfig", "gitconfig"),
-        (home / ".gitconfig", DOTFILES_DIR / "gitconfig-work", "gitconfig-work"),
-        (home / ".abcde.conf", DOTFILES_DIR / "abcde.conf", "abcde.conf"),
-        (home / ".pypi.rc", DOTFILES_DIR / "pypi.rc", "pypi.rc"),
-        (home / ".config" / "language-server.json", DOTFILES_DIR / "language-server.json", "language-server.json"),
-        (home / ".msmtprc", DOTFILES_DIR / "msmtprc", "msmtprc"),
-        (home / ".ssh" / "config", DOTFILES_DIR / "ssh-config", "ssh config"),
-        (home / ".ssh" / "config", DOTFILES_DIR / "ssh-config-work", "ssh config-work"),
+    # Check general config files based on host type
+    files_to_check = []
+
+    # Gitconfig - only check the one used for this host
+    if is_work_host(SETUP_HOST):
+        files_to_check.append((home / ".gitconfig", DOTFILES_DIR / "gitconfig-work", "gitconfig"))
+    else:
+        files_to_check.append((home / ".gitconfig", DOTFILES_DIR / "gitconfig", "gitconfig"))
+
+    # SSH config - only check the one used for this host
+    if is_work_host(SETUP_HOST):
+        files_to_check.append((home / ".ssh" / "config", DOTFILES_DIR / "ssh-config-work", "ssh config"))
+    else:
+        files_to_check.append((home / ".ssh" / "config", DOTFILES_DIR / "ssh-config", "ssh config"))
+
+    # Files only on non-nvidia hosts
+    if "km.nvidia.com" not in SETUP_HOST:
+        files_to_check.extend([
+            (home / ".abcde.conf", DOTFILES_DIR / "abcde.conf", "abcde.conf"),
+            (home / ".pypi.rc", DOTFILES_DIR / "pypi.rc", "pypi.rc"),
+            (home / ".config" / "language-server.json", DOTFILES_DIR / "language-server.json", "language-server.json"),
+            (home / ".msmtprc", DOTFILES_DIR / "msmtprc", "msmtprc"),
+        ])
+
+    # Common files
+    files_to_check.extend([
         (home / ".config" / "fish" / "config.fish", DOTFILES_DIR / "fish-config.fish", "fish config.fish"),
         (home / ".config" / "fish" / "config-linux.fish", DOTFILES_DIR / "fish-config-linux.fish", "fish config-linux.fish"),
-        (home / ".config" / "kitty" / "kitty.conf", DOTFILES_DIR / "kitty.conf", "kitty.conf"),
-        (home / ".tmux.conf", DOTFILES_DIR / "tmux.conf", "tmux.conf"),
         (home / ".config" / "nvim" / "init.lua", DOTFILES_DIR / "neovim-init.lua", "neovim init.lua"),
         (home / ".config" / "nvim" / "lazy-lock.json", DOTFILES_DIR / "neovim-lazy-lock.json", "neovim lazy-lock.json"),
         (home / ".ctags", DOTFILES_DIR / "ctags", "ctags"),
-    ]
+    ])
+
+    # Files only on non-jump hosts
+    if SETUP_HOST != "jump.km.nvidia.com":
+        files_to_check.append((home / ".config" / "kitty" / "kitty.conf", DOTFILES_DIR / "kitty.conf", "kitty.conf"))
+
+    # Tmux only on personal machines
+    if not is_work_host(SETUP_HOST):
+        files_to_check.append((home / ".tmux.conf", DOTFILES_DIR / "tmux.conf", "tmux.conf"))
 
     # Check fish conf.d files
     for conf_file in ["mine-aliases-git.fish", "mine-arch-aliases.fish", "mine-python.fish", "mine-ssh.fish", "mine-work.fish"]:

@@ -15,7 +15,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.theme import Theme
 
@@ -41,6 +41,11 @@ logging.basicConfig(
 )
 
 log = logging.getLogger(__name__)
+
+
+def is_interactive() -> bool:
+    """Check if stdin is connected to an interactive terminal"""
+    return sys.stdin.isatty()
 
 
 def run_cmd(cmd: list[str], dry_run: bool = False) -> int:
@@ -178,11 +183,28 @@ def ensure_copy(source: Path, dest: Path, dry_run: bool = False) -> bool:
             show_file_diff(source, dest, dry_run)
 
             if dry_run:
-                # In dry-run mode, assume we would copy
+                log.info(f"[dim]Preview mode: skipping copy of[/] [bold]{dest}[/]", stacklevel=2)
+                return False
+
+            if not is_interactive():
+                log.warning(f"[yellow]Non-interactive mode: skipping file that differs[/] [bold]{dest}[/]", stacklevel=2)
+                log.info("[dim]Run interactively to choose: overwrite, sync-back, or skip[/]", stacklevel=2)
+                return False
+
+            choice = Prompt.ask(
+                "What would you like to do?",
+                choices=["overwrite", "sync-back", "skip"],
+                default="skip"
+            )
+
+            if choice == "overwrite":
                 should_copy = True
-            elif Confirm.ask("Copy source file over destination?", default=False):
-                should_copy = True
-            else:
+            elif choice == "sync-back":
+                log.info(f"[green]Syncing[/] [bold cyan]{dest}[/] [green]back to[/] [bold cyan]{source}[/]", stacklevel=2)
+                shutil.copy2(dest, source)
+                log.info(f"[dim]Skipping copy of[/] [bold]{dest}[/]", stacklevel=2)
+                return False
+            else:  # skip
                 log.info(f"[dim]Skipping copy of[/] [bold]{dest}[/]", stacklevel=2)
                 return False
     else:
@@ -225,16 +247,34 @@ def detect_file_changes(file1: Path, file2: Path) -> bool:
 def sync_file_back(home_file: Path, dotfiles_file: Path, description: str, dry_run: bool = False) -> bool:
     """Sync file back from home to dotfiles"""
     if detect_file_changes(home_file, dotfiles_file):
-        log.warning(f"[yellow]File[/] [bold]'{description}'[/] [yellow]has changed in home directory[/]", stacklevel=2)
+        log.warning(f"[yellow]File[/] [bold]'{description}'[/] [yellow]has changed[/]", stacklevel=2)
         show_file_diff(dotfiles_file, home_file, dry_run)
 
-        if dry_run or Confirm.ask("Sync changes back to dotfiles?", default=False):
-            log.info(f"[green]Syncing[/] [bold cyan]{home_file}[/] [green]back to[/] [bold cyan]{dotfiles_file}[/]", stacklevel=2)
+        if not is_interactive():
+            log.warning(f"[yellow]Non-interactive mode: skipping sync of[/] [bold]{description}[/]", stacklevel=2)
+            log.info("[dim]Run interactively to choose sync direction[/]", stacklevel=2)
+            return False
+
+        choice = Prompt.ask(
+            r"What would you like to do? \[y]es sync to dotfiles / \[n]o restore from dotfiles / \[s]kip",
+            choices=["y", "n", "s"],
+            default="s"
+        )
+
+        if choice == "y":
+            log.info(f"[green]Syncing[/] [bold cyan]{home_file}[/] [green]to[/] [bold cyan]{dotfiles_file}[/]", stacklevel=2)
             if dry_run:
                 log.warning(f"[yellow]NORUN:[/] [dim]cp '{home_file}' '{dotfiles_file}'[/]", stacklevel=2)
             else:
                 shutil.copy2(home_file, dotfiles_file)
             return True
-        else:
-            log.info(f"[dim]Skipping sync of[/] [bold]{description}[/]", stacklevel=2)
+        elif choice == "n":
+            log.info(f"[green]Restoring[/] [bold cyan]{dotfiles_file}[/] [green]to[/] [bold cyan]{home_file}[/]", stacklevel=2)
+            if dry_run:
+                log.warning(f"[yellow]NORUN:[/] [dim]cp '{dotfiles_file}' '{home_file}'[/]", stacklevel=2)
+            else:
+                shutil.copy2(dotfiles_file, home_file)
+            return False
+        else:  # skip
+            log.info(f"[dim]Skipping[/] [bold]{description}[/]", stacklevel=2)
     return False
