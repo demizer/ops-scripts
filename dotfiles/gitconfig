@@ -33,3 +33,8 @@
 [safe]
 	directory = /opt/esp-idf
 	directory = /opt/esp-idf/components/openthread/openthread
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process

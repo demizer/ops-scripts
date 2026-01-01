@@ -982,6 +982,9 @@ end
 
 require("lazy").setup(plugins, lazy_opts)
 
+-- Set colorscheme
+vim.cmd("colorscheme duskfox")
+
 -- Auto-close install window after completion on fresh install
 if is_fresh_install and not lockfile_path then
     vim.api.nvim_create_autocmd("User", {
