@@ -1,0 +1,4 @@
+/* Hide the native tab bar when using Tree Style Tab */
+#TabsToolbar {
+  visibility: collapse;
+}

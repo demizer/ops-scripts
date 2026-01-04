@@ -273,6 +273,107 @@ def setup_tmux_dotfiles() -> None:
     setup_common.ensure_copy(DOTFILES_DIR / "tmux.conf", home / ".tmux.conf", dry_run=DRY_RUN)
 
 
+def setup_firefox_dotfiles() -> None:
+    """Setup Firefox userChrome.css to hide top tab bar"""
+    console.log(Panel("Firefox User Chrome Adjustment", style="bold green"))
+
+    log.info("[bold blue]Setup Firefox userChrome.css[/]")
+
+    if not setup_common.is_interactive():
+        log.warning("[yellow]Non-interactive mode: skipping Firefox setup (requires user input)[/]")
+        return
+
+    home = Path.home()
+    firefox_dir = home / ".mozilla" / "firefox"
+
+    if not firefox_dir.exists():
+        log.warning("[yellow]Firefox directory does not exist, skipping[/]")
+        return
+
+    # Find all profile directories
+    profiles = []
+    recommended_idx = None
+    for entry in sorted(firefox_dir.iterdir()):
+        if entry.is_dir() and not entry.name.startswith('.'):
+            # Skip non-profile directories
+            if entry.name in ('Crash Reports', 'Pending Pings', 'Profile Groups', 'firefox-mpris'):
+                continue
+            profiles.append(entry)
+            # Prefer .default-release as the recommended profile (may have timestamp suffix)
+            if '.default-release' in entry.name:
+                recommended_idx = len(profiles) - 1
+
+    if not profiles:
+        log.warning("[yellow]No Firefox profiles found, skipping[/]")
+        return
+
+    # Check if userChrome.css already exists in any profile
+    existing_profile = None
+    for profile in profiles:
+        if (profile / "chrome" / "userChrome.css").exists():
+            existing_profile = profile
+            break
+
+    if existing_profile is not None:
+        profile_dir = existing_profile
+        log.info(f"[green]Using existing profile:[/] [bold]{profile_dir}[/]")
+    elif len(profiles) == 1:
+        profile_dir = profiles[0]
+        log.info(f"[green]Using profile:[/] [bold]{profile_dir}[/]")
+    else:
+        log.info("[cyan]Detected Firefox profiles:[/]")
+        for i, profile in enumerate(profiles):
+            if i == recommended_idx:
+                log.info(f"  [bold green]{i + 1}. {profile} (recommended)[/]")
+            else:
+                log.info(f"  {i + 1}. {profile}")
+
+        log.info("[dim]Tip: Visit about:support in Firefox to verify your profile path[/]")
+
+        choice = input(f"Select profile number [1-{len(profiles)}], enter path, or 's' to skip: ").strip()
+
+        if choice.lower() == 's':
+            log.info("[dim]Skipping Firefox setup[/]")
+            return
+
+        # Check if it's a number selection
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(profiles):
+                profile_dir = profiles[idx]
+            else:
+                log.error(f"[bold red]Invalid selection:[/] [red]{choice}[/]")
+                return
+        else:
+            # Treat as a path
+            profile_dir = Path(choice).expanduser()
+
+    if not profile_dir.exists():
+        log.error(f"[bold red]Profile directory does not exist:[/] [red]{profile_dir}[/]")
+        return
+
+    if not profile_dir.is_dir():
+        log.error(f"[bold red]Path is not a directory:[/] [red]{profile_dir}[/]")
+        return
+
+    log.info(f"[green]Using profile:[/] [bold]{profile_dir}[/]")
+
+    chrome_dir = profile_dir / "chrome"
+    setup_common.ensure_dir_exists(chrome_dir, dry_run=DRY_RUN)
+
+    setup_common.ensure_copy(
+        DOTFILES_DIR / "firefox-userChrome.css",
+        chrome_dir / "userChrome.css",
+        dry_run=DRY_RUN
+    )
+
+    log.info("[yellow]IMPORTANT: To enable custom CSS in Firefox:[/]")
+    log.info("[yellow]  1. Visit about:config[/]")
+    log.info("[yellow]  2. Search for: toolkit.legacyUserProfileCustomizations.stylesheets[/]")
+    log.info("[yellow]  3. Set it to true[/]")
+    log.info("[yellow]  4. Restart Firefox[/]")
+
+
 def setup_neovim_dotfiles() -> None:
     """Setup neovim dotfiles"""
     console.log(Panel("NEOVIM DOTFILES", style="bold green"))
@@ -434,6 +535,20 @@ def sync_dotfiles_back() -> None:
             f"fish conf.d/{conf_file}"
         ))
 
+    # Check Firefox userChrome.css
+    firefox_dir = home / ".mozilla" / "firefox"
+    if firefox_dir.exists():
+        for entry in firefox_dir.iterdir():
+            if entry.is_dir() and entry.name.endswith(".default-release"):
+                chrome_file = entry / "chrome" / "userChrome.css"
+                if chrome_file.exists():
+                    files_to_check.append((
+                        chrome_file,
+                        DOTFILES_DIR / "firefox-userChrome.css",
+                        "firefox userChrome.css"
+                    ))
+                break
+
     for home_file, dotfiles_file, description in files_to_check:
         if setup_common.sync_file_back(home_file, dotfiles_file, description, dry_run=DRY_RUN):
             synced_count += 1
@@ -493,6 +608,7 @@ def main() -> None:
             setup_neovim_dotfiles()
             setup_fish_dotfiles()
             setup_kitty_dotfiles()
+            setup_firefox_dotfiles()
         else:
             # Personal setup
             setup_general_dotfiles()
@@ -501,6 +617,7 @@ def main() -> None:
             setup_fish_dotfiles()
             setup_kitty_dotfiles()
             setup_tmux_dotfiles()
+            setup_firefox_dotfiles()
 
     log.info(f"[bold green]{datetime.now().strftime('%c')}[/] [green]::[/] [bold bright_green]All Done![/]")
 
