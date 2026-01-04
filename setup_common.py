@@ -192,14 +192,14 @@ def ensure_copy(source: Path, dest: Path, dry_run: bool = False) -> bool:
                 return False
 
             choice = Prompt.ask(
-                "What would you like to do?",
-                choices=["overwrite", "sync-back", "skip"],
-                default="skip"
+                r"What would you like to do? \[o]verwrite / sync-\[b]ack / \[s]kip",
+                choices=["o", "b", "s"],
+                default="s"
             )
 
-            if choice == "overwrite":
+            if choice == "o":
                 should_copy = True
-            elif choice == "sync-back":
+            elif choice == "b":
                 log.info(f"[green]Syncing[/] [bold cyan]{dest}[/] [green]back to[/] [bold cyan]{source}[/]", stacklevel=2)
                 shutil.copy2(dest, source)
                 log.info(f"[dim]Skipping copy of[/] [bold]{dest}[/]", stacklevel=2)
