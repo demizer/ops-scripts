@@ -149,10 +149,45 @@ function alvaone-rebuild
 end
 
 function alvaone-build-pwd
+    # Exit on Ctrl+C
+    function __alvaone_cleanup --on-signal INT
+        echo ">>> Interrupted"
+        return 1
+    end
+
     find -maxdepth 2 -name PKGBUILD | while read -l file; mksrcinfo $file; end
     test -f /tmp/pacman.conf; and rm -rf /tmp/pacman.conf
     cp /usr/share/devtools/pacman.conf.d/extra.conf /tmp/pacman.conf
     cat /etc/pacman.d/alvaone >> /tmp/pacman.conf
+
+    # Sync package databases to pick up recently added alvaone packages
+    echo ">>> Syncing package databases..."
+    sudo pacman -Sy
+    or return 1
+
+    # Get AUR dependencies (not in official repos or alvaone)
+    echo ">>> Looking for PKGBUILD in: "(pwd)
+    echo ">>> PKGBUILD exists: "(test -f PKGBUILD && echo "yes" || echo "no")
+    set -l all_deps (bash -c 'source PKGBUILD && echo "${depends[@]}" "${makedepends[@]}"')
+    set -l aur_deps
+    for dep in (string split ' ' $all_deps)
+        test -z "$dep"; and continue
+        pacman -Si $dep &>/dev/null; and continue
+        test -z (pacman -T $dep 2>/dev/null); and continue
+        pacman -Sl alvaone 2>/dev/null | grep -q "^alvaone $dep "; and continue
+        # Check if dep exists in AUR
+        if not aur search -n "$dep" 2>/dev/null | grep -q "^aur/$dep "
+            echo ">>> ERROR: Dependency '$dep' not found in AUR"
+            return 1
+        end
+        set -a aur_deps $dep
+    end
+    echo ">>> Found "(count $aur_deps)" AUR deps to sync: $aur_deps"
+    if test (count $aur_deps) -gt 0
+        echo ">>> Syncing AUR dependencies: $aur_deps"
+        aur sync --sign --chroot --pacman-conf /tmp/pacman.conf $aur_deps
+        or return 1
+    end
 
     # --force       Compiles the package even if one is found with the same name
     # --gpg-sign    Sign build packages and the database
@@ -161,6 +196,7 @@ function alvaone-build-pwd
     # --chroot      Build in a systemd-nspawn container
     # --no-sync     Do not sync the local repository after building
     aur build --force --remove --verify --gpg-sign --database=alvaone --chroot --pacman-conf /tmp/pacman.conf --no-sync $argv[1..-1]
+    or return 1
 end
 
 #
