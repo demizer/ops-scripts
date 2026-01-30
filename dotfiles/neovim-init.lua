@@ -787,19 +787,35 @@ local plugins = {
         "neovim/nvim-lspconfig",
         lazy = false,
         config = function()
-            vim.lsp.enable("v_analyzer")
+            vim.lsp.enable("vls")
         end,
     },
     {
         "mason-org/mason-lspconfig.nvim",
-        -- lazy = false,
-        -- opts = {},
         dependencies = {
             { "mason-org/mason.nvim" },
             "neovim/nvim-lspconfig",
         },
         config = function(_, opts)
             require("mason-lspconfig").setup(opts)
+            -- Configure lua_ls with Neovim runtime
+            vim.lsp.config("lua_ls", {
+                settings = {
+                    Lua = {
+                        runtime = { version = "LuaJIT" },
+                        workspace = {
+                            checkThirdParty = false,
+                            library = {
+                                vim.env.VIMRUNTIME,
+                                "${3rd}/luv/library",
+                            },
+                        },
+                        diagnostics = {
+                            globals = { "vim", "Snacks" },
+                        },
+                    },
+                },
+            })
         end,
     },
     {
@@ -935,10 +951,14 @@ local plugins = {
         "folke/lazydev.nvim",
         ft = "lua", -- only load on lua files
         opts = {
+            enabled = true,
             library = {
-                -- See the configuration section for more details
+                -- Always load vim runtime
+                vim.env.VIMRUNTIME,
                 -- Load luvit types when the `vim.uv` word is found
                 { path = "${3rd}/luv/library", words = { "vim%.uv" } },
+                -- Load Snacks types when Snacks is used
+                { path = "snacks.nvim", words = { "Snacks" } },
             },
         },
     },
